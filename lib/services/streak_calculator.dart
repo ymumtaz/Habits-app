@@ -2,6 +2,12 @@ import '../models/habit.dart';
 import '../models/habit_log.dart';
 import '../utils/week_config.dart';
 
+/// Streak-length milestones a habit can earn a badge for. Checked
+/// against [StreakResult.bestStreak] rather than the current streak,
+/// so a badge is permanent once earned — it doesn't disappear if the
+/// streak later breaks.
+const milestoneThresholds = <int>[7, 30, 100, 365];
+
 /// Result of a streak computation for one habit.
 class StreakResult {
   final int currentStreak;
@@ -27,6 +33,10 @@ class StreakResult {
   /// than the historical best, so consistent recent behavior matters
   /// more than a long-past run. Tune freely later.
   int get score => currentStreak * 10 + bestStreak;
+
+  /// Milestone thresholds reached so far, based on [bestStreak].
+  List<int> get milestonesReached =>
+      [for (final t in milestoneThresholds) if (bestStreak >= t) t];
 }
 
 /// Turns a habit's raw completion logs into streak numbers.

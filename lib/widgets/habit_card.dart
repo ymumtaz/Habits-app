@@ -9,6 +9,11 @@ import 'streak_badge.dart';
 class HabitCard extends StatelessWidget {
   final Habit habit;
   final StreakResult streak;
+
+  /// Today's logged amount for a count/duration habit — null if
+  /// nothing's logged yet today. Unused for boolean habits.
+  final int? todayAmount;
+
   final VoidCallback onToggleToday;
   final VoidCallback onTap;
 
@@ -16,6 +21,7 @@ class HabitCard extends StatelessWidget {
     super.key,
     required this.habit,
     required this.streak,
+    this.todayAmount,
     required this.onToggleToday,
     required this.onTap,
   });
@@ -29,6 +35,9 @@ class HabitCard extends StatelessWidget {
         habit.frequency == HabitFrequency.daily ? 'Daily' : 'Weekly';
     final subtitle = '$frequencyLabel · $periodLabel';
     final isBoolean = habit.type == HabitType.boolean;
+    final target = habit.dailyTarget;
+    final showProgress = !isBoolean && target != null && target > 0;
+    final progress = showProgress ? (todayAmount ?? 0) / target : 0.0;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -44,7 +53,7 @@ class HabitCard extends StatelessWidget {
           child: Row(
             children: [
               CircleAvatar(
-                backgroundColor: habit.color.withValues(alpha: 0.18),
+                backgroundColor: habit.color.withOpacity(0.18),
                 foregroundColor: habit.color,
                 child: Icon(habit.icon),
               ),
@@ -65,6 +74,30 @@ class HabitCard extends StatelessWidget {
                       subtitle,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
+                    if (showProgress) ...[
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: progress.clamp(0.0, 1.0),
+                          minHeight: 5,
+                          color: habit.color,
+                          backgroundColor: habit.color.withOpacity(0.15),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${todayAmount ?? 0}/$target ${habit.unitLabel} today',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: streak.completedToday
+                                  ? habit.color
+                                  : null,
+                              fontWeight: streak.completedToday
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                      ),
+                    ],
                   ],
                 ),
               ),

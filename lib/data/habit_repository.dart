@@ -78,6 +78,19 @@ class HabitRepository {
     return rows.map(Habit.fromMap).toList();
   }
 
+  /// Only the archived habits — powers the "Archived" screen, which
+  /// unlike the normal habit list needs to see exactly the ones
+  /// [fetchHabits] leaves out.
+  Future<List<Habit>> fetchArchivedHabits() async {
+    final db = await _db;
+    final rows = await db.query(
+      'habits',
+      where: 'archived = 1',
+      orderBy: 'sort_order ASC',
+    );
+    return rows.map(Habit.fromMap).toList();
+  }
+
   // ---- Logs ----------------------------------------------------------
 
   /// Marks [habit] as done on [date]. Idempotent: logging the same day

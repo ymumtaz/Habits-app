@@ -102,6 +102,20 @@ class HabitProvider extends ChangeNotifier {
     await load();
   }
 
+  /// Archived habits — not part of the normal cached [habits] list
+  /// (which only ever holds active ones), fetched fresh each time the
+  /// Archived screen opens.
+  Future<List<Habit>> fetchArchivedHabits() => _repo.fetchArchivedHabits();
+
+  /// Restores an archived habit to active. Refreshes the normal
+  /// (active-only) [habits] list; the caller is responsible for
+  /// refreshing its own archived list afterward.
+  Future<void> unarchiveHabit(Habit habit) async {
+    if (habit.id == null) return;
+    await _repo.archiveHabit(habit.id!, archived: false);
+    await load();
+  }
+
   Future<void> _refreshLogsFor(int habitId) async {
     final freshLogs = await _repo.fetchLogs(habitId);
     _logsByHabit[habitId] = freshLogs;

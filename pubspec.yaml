@@ -33,6 +33,10 @@ dependencies:
   flutter_local_notifications: ^17.2.3
   timezone: ^0.9.4
 
+  # Local backup/restore: lets the user pick a previously-exported
+  # backup file to restore from.
+  file_picker: ^8.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

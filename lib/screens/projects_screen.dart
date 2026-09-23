@@ -2,12 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/project_provider.dart';
+import '../models/project.dart';
 import '../widgets/project_card.dart';
 import 'add_edit_project_screen.dart';
 import 'project_detail_screen.dart';
 
-class ProjectsScreen extends StatelessWidget {
+class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({super.key});
+
+  @override
+  State<ProjectsScreen> createState() => _ProjectsScreenState();
+}
+
+class _ProjectsScreenState extends State<ProjectsScreen> {
+  ProjectStatus? _filter;
 
   @override
   Widget build(BuildContext context) {
@@ -15,7 +23,16 @@ class ProjectsScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Projects')),
-      body: _buildBody(context, provider),
+      body: Column(
+        children: [
+          if (!provider.isLoading && provider.projects.isNotEmpty)
+            _StatusFilterBar(
+              selected: _filter,
+              onChanged: (status) => setState(() => _filter = status),
+            ),
+          Expanded(child: _buildBody(context, provider)),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const AddEditProjectScreen()),
@@ -38,37 +55,123 @@ class ProjectsScreen extends StatelessWidget {
       );
     }
 
+    // Reordering only makes sense against the unfiltered list — its
+    // persisted sort_order spans every project, so dragging within a
+    // filtered subset would otherwise scramble the full order.
+    if (_filter != null) {
+      final filtered =
+          provider.projects.where((p) => p.status == _filter).toList();
+      if (filtered.isEmpty) {
+        return Center(
+          child: Text(
+            'No ${_filter!.label.toLowerCase()} projects.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        );
+      }
+      // A parent may itself be filtered out (different status than its
+      // child) — orderProjectsWithDepth treats a project whose parent
+      // isn't in this filtered subset as top-level, so grouping only
+      // ever happens between projects that are both actually shown.
+      final ordered = orderProjectsWithDepth(filtered);
+      return RefreshIndicator(
+        onRefresh: provider.load,
+        child: ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: ordered.length,
+          itemBuilder: (context, index) {
+            final (project, depth) = ordered[index];
+            return _buildCard(context, provider, project, depth);
+          },
+        ),
+      );
+    }
+
+    final ordered = orderProjectsWithDepth(provider.projects);
     return RefreshIndicator(
       onRefresh: provider.load,
       child: ReorderableListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: provider.projects.length,
-        onReorder: provider.reorderProjects,
-        itemBuilder: (context, index) {
-          final project = provider.projects[index];
-          return ProjectCard(
-            key: ValueKey(project.id),
-            project: project,
-            totalDuration: provider.totalDurationFor(project),
-            isRunning: provider.isRunning(project),
-            isPaused: provider.isPaused(project),
-            onToggleTimer: () {
-              if (provider.isRunning(project)) {
-                provider.pauseActiveSession();
-              } else if (provider.isPaused(project)) {
-                provider.resumeActiveSession();
-              } else {
-                provider.beginSession(project);
-              }
-            },
-            onEndSession: () => provider.endActiveSession(),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ProjectDetailScreen(project: project),
-              ),
-            ),
-          );
+        itemCount: ordered.length,
+        onReorder: (oldIndex, newIndex) {
+          if (oldIndex < newIndex) newIndex -= 1;
+          final newOrder = [for (final (p, _) in ordered) p];
+          final moved = newOrder.removeAt(oldIndex);
+          newOrder.insert(newIndex, moved);
+          provider.reorderProjectsList(newOrder);
         },
+        itemBuilder: (context, index) {
+          final (project, depth) = ordered[index];
+          return _buildCard(context, provider, project, depth);
+        },
+      ),
+    );
+  }
+
+  Widget _buildCard(
+    BuildContext context,
+    ProjectProvider provider,
+    Project project,
+    int depth,
+  ) {
+    return Padding(
+      key: ValueKey(project.id),
+      padding: EdgeInsets.only(left: 24.0 * depth),
+      child: ProjectCard(
+        project: project,
+        totalDuration: provider.totalDurationFor(project),
+        isRunning: provider.isRunning(project),
+        isPaused: provider.isPaused(project),
+        categoryName: provider.categoryFor(project)?.name,
+        onToggleTimer: () {
+          if (provider.isRunning(project)) {
+            provider.pauseActiveSession();
+          } else if (provider.isPaused(project)) {
+            provider.resumeActiveSession();
+          } else {
+            provider.beginSession(project);
+          }
+        },
+        onEndSession: () => provider.endActiveSession(),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ProjectDetailScreen(project: project),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusFilterBar extends StatelessWidget {
+  final ProjectStatus? selected;
+  final ValueChanged<ProjectStatus?> onChanged;
+
+  const _StatusFilterBar({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            ChoiceChip(
+              label: const Text('All'),
+              selected: selected == null,
+              onSelected: (_) => onChanged(null),
+            ),
+            for (final status in ProjectStatus.values) ...[
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text(status.label),
+                selected: selected == status,
+                onSelected: (_) => onChanged(status),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

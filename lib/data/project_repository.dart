@@ -1,7 +1,8 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../models/project.dart';
-import '../models/project_task.dart';
+import '../models/project_category.dart';
+import '../models/task.dart';
 import '../models/time_entry.dart';
 import 'database.dart';
 
@@ -76,6 +77,19 @@ class ProjectRepository {
     final rows = await db.query(
       'projects',
       where: includeArchived ? null : 'archived = 0',
+      orderBy: 'sort_order ASC',
+    );
+    return rows.map(Project.fromMap).toList();
+  }
+
+  /// Only the archived projects — powers the "Archived" screen, which
+  /// unlike the normal project list needs to see exactly the ones
+  /// [fetchProjects] leaves out.
+  Future<List<Project>> fetchArchivedProjects() async {
+    final db = await _db;
+    final rows = await db.query(
+      'projects',
+      where: 'archived = 1',
       orderBy: 'sort_order ASC',
     );
     return rows.map(Project.fromMap).toList();
@@ -246,55 +260,103 @@ class ProjectRepository {
     await db.delete('time_entries', where: 'id = ?', whereArgs: [entryId]);
   }
 
-  // ---- Project tasks (optional checklist) -----------------------------
+  // ---- Project categories (user-managed types) --------------------------
 
-  Future<List<ProjectTask>> fetchTasks(int projectId) async {
+  Future<List<ProjectCategory>> fetchCategories() async {
+    final db = await _db;
+    final rows = await db.query('project_categories', orderBy: 'sort_order ASC');
+    return rows.map(ProjectCategory.fromMap).toList();
+  }
+
+  Future<int> createCategory(String name) async {
+    final db = await _db;
+    final nextOrder = await _nextSortOrder(db, 'project_categories');
+    return db.insert('project_categories', {'name': name, 'sort_order': nextOrder});
+  }
+
+  Future<void> renameCategory(int id, String name) async {
+    final db = await _db;
+    await db.update('project_categories', {'name': name},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Deletes a category outright. Any project tagged with it just
+  /// loses the tag (`category_id` is set null by the FK's
+  /// `ON DELETE SET NULL`) — nothing else about those projects changes.
+  Future<void> deleteCategory(int id) async {
+    final db = await _db;
+    await db.delete('project_categories', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ---- Tasks (project checklist item, or a standalone to-do) ----------
+
+  Future<List<Task>> fetchTasks(int projectId) async {
     final db = await _db;
     final rows = await db.query(
-      'project_tasks',
+      'tasks',
       where: 'project_id = ?',
       whereArgs: [projectId],
       orderBy: 'sort_order ASC',
     );
-    return rows.map(ProjectTask.fromMap).toList();
+    return rows.map(Task.fromMap).toList();
   }
 
-  /// All tasks for every project at once, grouped by project id — same
-  /// one-query-instead-of-N pattern [fetchAllEntries] uses.
-  Future<Map<int, List<ProjectTask>>> fetchAllTasks() async {
+  /// All project-scoped tasks at once, grouped by project id — same
+  /// one-query-instead-of-N pattern [fetchAllEntries] uses. Standalone
+  /// tasks (no project) are fetched separately via
+  /// [fetchStandaloneTasks].
+  Future<Map<int, List<Task>>> fetchAllProjectTasks() async {
     final db = await _db;
-    final rows = await db.query('project_tasks', orderBy: 'sort_order ASC');
-    final grouped = <int, List<ProjectTask>>{};
+    final rows = await db.query(
+      'tasks',
+      where: 'project_id IS NOT NULL',
+      orderBy: 'sort_order ASC',
+    );
+    final grouped = <int, List<Task>>{};
     for (final row in rows) {
-      final task = ProjectTask.fromMap(row);
-      grouped.putIfAbsent(task.projectId, () => []).add(task);
+      final task = Task.fromMap(row);
+      grouped.putIfAbsent(task.projectId!, () => []).add(task);
     }
     return grouped;
   }
 
-  Future<int> createTask(ProjectTask task) async {
+  /// The general "To-dos" list — tasks with no project.
+  Future<List<Task>> fetchStandaloneTasks() async {
     final db = await _db;
-    final rows = await db.rawQuery(
-      'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM project_tasks '
-      'WHERE project_id = ?',
-      [task.projectId],
+    final rows = await db.query(
+      'tasks',
+      where: 'project_id IS NULL',
+      orderBy: 'sort_order ASC',
     );
-    final nextOrder = rows.first['next'] as int;
+    return rows.map(Task.fromMap).toList();
+  }
+
+  Future<int> createTask(Task task) async {
+    final db = await _db;
+    final nextOrder = await _nextTaskSortOrder(db, task.projectId);
     final map = task.toMap()
       ..remove('id')
       ..['sort_order'] = nextOrder;
-    return db.insert('project_tasks', map);
+    return db.insert('tasks', map);
   }
 
-  Future<void> updateTask(ProjectTask task) async {
+  Future<int> _nextTaskSortOrder(Database db, int? projectId) async {
+    final rows = await db.rawQuery(
+      'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM tasks '
+      'WHERE project_id ${projectId == null ? 'IS NULL' : '= ?'}',
+      projectId == null ? [] : [projectId],
+    );
+    return rows.first['next'] as int;
+  }
+
+  Future<void> updateTask(Task task) async {
     assert(task.id != null, 'Cannot update a task without an id');
     final db = await _db;
-    await db.update('project_tasks', task.toMap(),
-        where: 'id = ?', whereArgs: [task.id]);
+    await db.update('tasks', task.toMap(), where: 'id = ?', whereArgs: [task.id]);
   }
 
   Future<void> deleteTask(int taskId) async {
     final db = await _db;
-    await db.delete('project_tasks', where: 'id = ?', whereArgs: [taskId]);
+    await db.delete('tasks', where: 'id = ?', whereArgs: [taskId]);
   }
 }

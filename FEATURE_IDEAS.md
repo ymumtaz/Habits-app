@@ -9,15 +9,26 @@ has a rough effort tag: **S** (an evening), **M** (a weekend), **L**
 
 ## 1. Habit types & scheduling
 
-Right now a habit is boolean (done/not done) and either daily or "X times
-a week." Real habits are often richer than that:
+Right now a habit is boolean (done/not done) or a count/duration tracked
+against a daily target, either daily or weekly. Real habits are often
+richer than that:
 
-- **Counter/quantity habits (M)** — "drink 8 glasses of water" tracked as a
-  running count against a daily target, not just done/not-done. Natural
-  fit for water, pages read, pushups, etc. Needs a small schema change
-  (a `target_count` and per-log `amount` instead of just a boolean log).
-- **Duration habits (M)** — "meditate 10 min," "read 20 min" — tie into a
-  timer like the Projects side already has, rather than a single tap.
+- ✅ **Counter/quantity habits (M)** — Done: "read 30 pages," "drink 8
+  glasses of water" tracked as a running count against a daily target.
+  Polished further this round: a count habit can carry its own unit word
+  (e.g. "pages", "glasses", "reps" — set from the "Unit (optional)" field
+  when creating one; blank falls back to a generic "x"), the name field's
+  placeholder example changes per type instead of always showing the
+  boolean-habit example, the default daily target is 10 (was a flat 8
+  shared with duration), and the habit card on the Habits page now shows
+  today's progress (e.g. "13/30 pages") with a small progress bar, not
+  just a checkbox.
+- ✅ **Duration habits (M)** — Done: "meditate 15 min," "read 20 min"
+  tracked against a daily target in minutes (default 15), same progress
+  display on the habit card as count habits. A live timer tied into a
+  duration habit (rather than logging a number after the fact) isn't
+  built — that would mean closer integration with the Projects side's
+  timer mechanics; not started.
 - **Specific days of the week (S)** — "gym on Mon/Wed/Fri" instead of only
   "daily" or "N times/week." More faithful to how people actually schedule
   habits than a flat weekly count.
@@ -28,6 +39,15 @@ a week." Real habits are often richer than that:
   weekly habit spends it on a week's shortfall (target minus what was
   actually done). E.g. missing 2 days this month stays 2 days no matter
   which habit it comes from — not a whole tolerated week's worth.
+- ✅ **Clearer habit-form wording (S)** — Done: "X times / week" (both on
+  the add/edit habit screen and the default-frequency setting) is now
+  just "Weekly," paired cleanly with "Daily" — the actual number is set
+  separately via the "Target per week" slider that appears once Weekly
+  is picked, so the segmented button label didn't need to carry it. Also
+  restyled the add/edit habit form: the title field (renamed from "Name"
+  to "Title") uses a larger font than the notes field below it, matching
+  how the two are actually used — one's the main thing, one's optional
+  detail.
 - **Custom interval habits (M)** — "every 3 days," "every other week"
   (e.g. watering a plant, deep-cleaning something).
 - **Vacation/skip days (M)** — mark a day as excused so it doesn't count
@@ -41,8 +61,10 @@ a week." Real habits are often richer than that:
 - **Streak-freeze tokens (M)** — Duolingo-style: earn a limited number of
   "skip a day for free" tokens (e.g. one per week) so streaks survive an
   occasional miss without being trivially easy to maintain.
-- **Milestone badges (S)** — 7/30/100/365-day badges per habit, shown on
-  the detail screen. Mostly a UI/data-flag feature, cheap to add.
+- ✅ **Milestone badges (S)** — Done: 7/30/100/365-day badges on the
+  habit detail screen, filled in once `bestStreak` reaches that
+  threshold. Permanent once earned — a badge doesn't dim again if the
+  current streak later breaks.
 - **Configurable streak-score formula (S)** — expose the weighting in
   `StreakCalculator` as a setting instead of a hardcoded constant, so you
   can tune what "streak score" rewards (recent consistency vs. all-time
@@ -59,6 +81,14 @@ a week." Real habits are often richer than that:
 - ✅ **Shareable streak card (M)** — Done: a "Share streak" icon on a
   habit's detail screen renders a small branded card (streak, best
   streak, score) to an image and opens the normal Android share sheet.
+  Fixed a bug where the share button silently did nothing: the render
+  target was wrapped in `Offstage`, which skips *painting* its child
+  entirely (not just hiding it), so the `RepaintBoundary` behind it
+  had no layer to capture and `toImage()` failed — with no visible
+  error, since the tap handler wasn't awaited. Now positioned off
+  the edge of the screen instead (still painted, just not visible),
+  with a loading state on the button and an error snackbar if a
+  share ever fails.
 
 ## 3. Analytics & the "archive" angle
 
@@ -71,6 +101,16 @@ building views on top:
   heatmap"), most-recent-week-first. Deliberately not anchored to Jan 1 —
   a calendar-year grid would look mostly empty for months after you start
   a habit, so it's a rolling window instead, full from day one.
+- ✅ **Weekday pattern chart for count/duration habits (S)** — Done: a
+  "By day of the week" column chart on the habit detail screen (count
+  and duration habits only — a boolean habit is just done/not-done, so
+  there's no amount to average), showing the average logged amount per
+  weekday across the habit's whole history — e.g. "I read more on
+  Saturdays." Averaged only over days that actually have a log, so a
+  freshly-started habit isn't skewed by phantom zeros on weekdays you
+  simply haven't reached yet. Hand-rolled (no charting package added),
+  matching the yearly heatmap's approach of a small custom widget
+  colored with the habit's own color.
 - ✅ **Cross-habit dashboard (M)** — Done: a new "Insights" tab (Habits
   sub-tab) shows this month's overall completion rate and every habit
   ranked best-to-worst. A compact summary card also sits at the top of
@@ -93,8 +133,29 @@ building views on top:
   note, editable from the session list.
 - ✅ **Edit an existing entry (S)** — Done: tap a past session to fix its
   date/time/duration/note.
-- ✅ **Project tags/categories (M)** — Done: a free-text tag on each
-  project, shown as a small chip on the card and detail screen.
+- ✅ **Project tags/categories (M)** — Done, upgraded from the original
+  free-text version: categories are now a user-managed list (Settings
+  → project's "manage categories" pencil icon) instead of typed text,
+  seeded with Course/Research/Side project/Personal/Work. Add, rename,
+  or delete your own; deleting one just clears that tag off any
+  project that had it. Picked from a dropdown when creating/editing a
+  project, shown as a chip on the card and detail screen.
+- ✅ **Project status (S)** — Done: Ongoing / On hold / Completed,
+  independent of archiving — a finished project can stay status
+  "Completed" and visible in the normal list until you separately
+  choose to archive it. Set from a segmented control on the
+  create/edit screen or directly on the detail screen; filterable via
+  chips at the top of the Projects list (drag-to-reorder is disabled
+  while a status filter is active, since the persisted order spans all
+  projects, not just the filtered ones).
+- ✅ **Parent/child projects (M)** — Done: a project can optionally nest
+  under one parent (e.g. "Chapter 1" under "Master's thesis") via a
+  dropdown on the create/edit screen, restricted to projects that
+  wouldn't create a cycle. A project's detail screen shows a "Part of
+  X" chip linking up to its parent, and a "Sub-projects" section
+  listing its children with each one's tracked time. Single parent
+  only (a tree, not a general graph) — simplest model that covers the
+  common case.
 - ✅ **Weekly time goals per project (M)** — Done: an optional weekly hour
   goal per project, with a progress bar on the detail screen. (Monthly
   goals weren't added — the schema only supports a weekly figure for now.)
@@ -109,13 +170,38 @@ building views on top:
   session (or keep it as-is). Pure Flutter app-lifecycle handling, no
   native platform code — doesn't require the phone to be unlocked or
   the app foregrounded to detect the gap, just backgrounded.
-- ✅ **Sub-tasks within a project (L)** — Done, scoped down to what was
-  asked for ("optionally add tasks to project"): an optional checklist
-  under each project (add / check off / swipe to delete). It's
-  organizational only — a task doesn't carry its own tracked time, time
-  tracking stays at the project level, same as before.
+- ✅ **Sub-tasks within a project (L)** — Done, then generalized: an
+  optional checklist under each project (add / check off / swipe to
+  delete). It's organizational only — a task doesn't carry its own
+  tracked time, time tracking stays at the project level.
+- ✅ **Standalone to-do list (M)** — Done, relocated twice based on
+  feedback: first shipped as its own "To-dos" bottom-nav tab, then folded
+  directly into the Habits page below the summary card — which felt
+  "intimidating" sitting there by default — and now lives behind a
+  checklist icon in the Habits app bar instead, opening a dedicated
+  To-dos page. The icon carries a small badge with the count of
+  unchecked to-dos, so what's pending is visible without opening the
+  page. Each to-do can optionally carry a due date (tap the calendar
+  icon on a to-do; long-press it to clear the date); dated ones sort
+  soonest-first, undated ones follow. A to-do due on a future date is
+  tucked behind a collapsed "Tasks for later (N)" row instead of
+  cluttering the main list — tap to expand and see what's coming up.
+  Under the hood this is the same underlying `Task` as a project's
+  checklist item, just with no project attached and an optional due
+  date — one model, one widget (`TaskChecklist`), reused on this page,
+  rather than a second parallel to-do system. The app-bar badge itself
+  was refined further: it now counts only to-dos actually due *today*
+  (not the full pending total), so an empty badge really does mean
+  "nothing on for today," not just "nothing due-or-overdue."
 - **Calendar view of tracked time (M)** — see which project you worked on
   each day, at a glance, across projects. Not started.
+- ✅ **Visual parent/child indentation on the Projects list (S)** — Done:
+  a child project now renders directly under its parent, indented, so
+  the relationship reads at a glance instead of relying on a small "Part
+  of X" caption. Applies to both the main reorderable list and any
+  status-filtered view (a project whose parent got filtered out just
+  falls back to top-level for display). Drag-to-reorder still works
+  against this grouped order.
 
 ## 5. App-wide / quality-of-life
 
@@ -133,10 +219,9 @@ building views on top:
   delete.
 - ✅ **Reorder habits/projects (S)** — Done: long-press and drag on either
   list screen; order is saved.
-- **Unarchive UI (S)** — habits/projects can be archived but there's
-  currently no screen to view or restore archived ones — right now it's a
-  one-way door in the UI even though the data model supports restoring.
-  Not started.
+- ✅ **Unarchive UI (S)** — Done: Settings → Archived lists archived
+  habits and projects with an "Unarchive" action, plus a separate
+  "delete permanently" option for actually clearing one out for good.
 - ✅ **Settings screen (M)** — Done: covers 12h/24h time, first day of the
   week, default habit frequency, and the recap notification schedule,
   alongside the theme picker. Manual dark-mode override is covered by
@@ -149,10 +234,17 @@ building views on top:
   reasonable for one global preference used in a personal app. Covered
   by new tests confirming a Sunday-start week groups dates differently
   than the Monday default.
-- **Local backup/restore (M)** — export the whole SQLite file (or a JSON
-  dump) to a file the user can save/share, and import it back. Cheap
-  insurance before this becomes a multi-year archive you'd hate to lose to
-  a lost phone. Not started.
+- ✅ **Local backup/restore (M)** — Done: Settings → Backup & restore.
+  Export copies the live SQLite file and opens the normal Android share
+  sheet, so you choose where it lands (Google Drive, email, "Save to
+  device", ...). Restore picks a file via the system file picker,
+  sanity-checks it actually looks like a habits-app backup (not just
+  any file), confirms with an explicit warning since it's destructive,
+  then overwrites the live database and reloads. Uses the new
+  `file_picker` package — like the other Android-facing pieces built
+  in this environment, this one is a strong first draft that hasn't
+  been run on-device yet, so give both the export and restore paths a
+  real test before trusting them with your only copy of the data.
 - **Android home-screen widgets (L)** — Reverted. A first pass (a habit
   progress widget + a monthly grid widget, via the `home_widget`
   package) was built and got the app compiling, but the widgets
@@ -213,7 +305,8 @@ task checklists, pause/resume sessions, idle detection, a theme picker
 logs and sessions, drag-to-reorder, a Settings screen (time format, first
 day of week, default habit frequency, recap notifications), a yearly
 heatmap per habit, cross-habit/cross-project dashboards (the "Insights"
-tab), a shareable streak card, and daily/weekly recap notifications.
+tab), a shareable streak card, daily/weekly recap notifications, milestone
+badges, unarchive UI, and local backup/restore.
 
 The Android home-screen widgets were attempted and then reverted (see the
 note above) — not currently part of the app.

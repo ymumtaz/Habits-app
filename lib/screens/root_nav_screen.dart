@@ -31,7 +31,11 @@ class _RootNavScreenState extends State<RootNavScreen>
     with WidgetsBindingObserver {
   int _index = 0;
 
-  static const _screens = [HomeScreen(), ProjectsScreen(), InsightsScreen()];
+  static const _screens = [
+    HomeScreen(),
+    ProjectsScreen(),
+    InsightsScreen(),
+  ];
 
   /// How long the app can sit in the background with a timer running
   /// before we ask whether that time should count.

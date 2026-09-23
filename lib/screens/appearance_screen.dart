@@ -7,6 +7,8 @@ import '../services/notification_service.dart';
 import '../services/recap_scheduler.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_provider.dart';
+import 'archived_screen.dart';
+import 'backup_screen.dart';
 
 const _weekdayNames = {
   DateTime.monday: 'Monday',
@@ -58,9 +60,9 @@ class AppearanceScreen extends StatelessWidget {
           ),
           const Divider(height: 32),
           const _SectionHeader('Week'),
-          const ListTile(
-            title: Text('First day of the week'),
-            subtitle: Text(
+          ListTile(
+            title: const Text('First day of the week'),
+            subtitle: const Text(
               'Sets the week boundary used for weekly habit streaks, '
               'weekly time goals, and "this week" figures in Insights.',
             ),
@@ -180,9 +182,9 @@ class AppearanceScreen extends StatelessWidget {
           ],
           const Divider(height: 32),
           const _SectionHeader('New habits'),
-          const ListTile(
-            title: Text('Default frequency'),
-            subtitle: Text('Used to pre-fill the "Add habit" screen'),
+          ListTile(
+            title: const Text('Default frequency'),
+            subtitle: const Text('Used to pre-fill the "Add habit" screen'),
           ),
           RadioListTile<HabitFrequency>(
             value: HabitFrequency.daily,
@@ -198,7 +200,27 @@ class AppearanceScreen extends StatelessWidget {
             onChanged: (v) {
               if (v != null) settings.setDefaultHabitFrequency(v);
             },
-            title: const Text('X times / week'),
+            title: const Text('Weekly'),
+          ),
+          const Divider(height: 32),
+          const _SectionHeader('Data'),
+          ListTile(
+            leading: const Icon(Icons.inventory_2_outlined),
+            title: const Text('Archived'),
+            subtitle: const Text('View, restore, or permanently delete '
+                'archived habits and projects'),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ArchivedScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.backup_outlined),
+            title: const Text('Backup & restore'),
+            subtitle: const Text('Export everything to a file, or restore '
+                'from a previous export'),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BackupScreen()),
+            ),
           ),
         ],
       ),

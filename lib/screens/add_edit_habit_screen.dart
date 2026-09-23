@@ -5,17 +5,6 @@ import '../data/habit_provider.dart';
 import '../data/settings_provider.dart';
 import '../models/habit.dart';
 
-const _iconChoices = <IconData>[
-  Icons.fitness_center,
-  Icons.local_drink,
-  Icons.menu_book,
-  Icons.phone_iphone,
-  Icons.bedtime,
-  Icons.self_improvement,
-  Icons.directions_run,
-  Icons.check_circle_outline,
-];
-
 const _colorChoices = <Color>[
   Colors.teal,
   Colors.indigo,
@@ -26,6 +15,13 @@ const _colorChoices = <Color>[
   Colors.blue,
   Colors.brown,
 ];
+
+/// The daily target pre-filled when a brand-new habit switches to this
+/// type — a reasonable starting point, not a hard rule. Only applied
+/// when creating a new habit (never overwrites an existing one's saved
+/// target just because you glanced at a different type while editing).
+const _defaultCountTarget = 10;
+const _defaultDurationTarget = 15;
 
 /// Create or edit a habit. Pass [existing] to edit; omit to create new.
 class AddEditHabitScreen extends StatefulWidget {
@@ -41,6 +37,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
   late TextEditingController _dailyTargetController;
+  late TextEditingController _unitController;
   late HabitFrequency _frequency;
   late int _targetPerWeek;
   late HabitType _type;
@@ -57,15 +54,41 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
     _nameController = TextEditingController(text: h?.name ?? '');
     _descriptionController =
         TextEditingController(text: h?.description ?? '');
-    _dailyTargetController =
-        TextEditingController(text: '${h?.dailyTarget ?? 8}');
+    _type = h?.type ?? HabitType.boolean;
+    _dailyTargetController = TextEditingController(
+      text: '${h?.dailyTarget ?? _defaultTargetFor(_type)}',
+    );
+    _unitController = TextEditingController(text: h?.unit ?? '');
     _frequency = h?.frequency ??
         context.read<SettingsProvider>().defaultHabitFrequency;
     _targetPerWeek = h?.targetPerWeek ?? 3;
-    _type = h?.type ?? HabitType.boolean;
     _tolerancePerMonth = h?.tolerancePerMonth ?? 0;
     _color = h?.color ?? _colorChoices.first;
-    _icon = h?.icon ?? _iconChoices.first;
+    _icon = h?.icon ?? habitIconChoices.first;
+  }
+
+  static int _defaultTargetFor(HabitType type) => switch (type) {
+        HabitType.count => _defaultCountTarget,
+        HabitType.duration => _defaultDurationTarget,
+        HabitType.boolean => _defaultCountTarget,
+      };
+
+  String get _nameHint => switch (_type) {
+        HabitType.boolean => 'e.g. Go to the gym',
+        HabitType.count => 'e.g. Pages of book read',
+        HabitType.duration => 'e.g. Meditate',
+      };
+
+  void _onTypeChanged(HabitType newType) {
+    setState(() {
+      // Only auto-fill the target for a brand-new habit — editing an
+      // existing one should never silently overwrite its real saved
+      // target just because you switched types to look around.
+      if (!_isEditing && newType != _type) {
+        _dailyTargetController.text = '${_defaultTargetFor(newType)}';
+      }
+      _type = newType;
+    });
   }
 
   @override
@@ -73,6 +96,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
     _nameController.dispose();
     _descriptionController.dispose();
     _dailyTargetController.dispose();
+    _unitController.dispose();
     super.dispose();
   }
 
@@ -81,6 +105,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
 
     final provider = context.read<HabitProvider>();
     final needsTarget = _type != HabitType.boolean;
+    final unit = _unitController.text.trim();
     final habit = (widget.existing ??
             Habit(name: '', createdAt: DateTime.now()))
         .copyWith(
@@ -94,6 +119,8 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
       dailyTarget:
           needsTarget ? (int.tryParse(_dailyTargetController.text) ?? 1) : null,
       clearDailyTarget: !needsTarget,
+      unit: (_type == HabitType.count && unit.isNotEmpty) ? unit : null,
+      clearUnit: !(_type == HabitType.count && unit.isNotEmpty),
       tolerancePerMonth: _tolerancePerMonth,
       color: _color,
       icon: _icon,
@@ -117,19 +144,23 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            // The title: the main thing you're naming, so it gets more
+            // visual weight than the optional notes below it.
             TextFormField(
               controller: _nameController,
-              decoration: const InputDecoration(
-                labelText: 'Name',
-                hintText: 'e.g. Go to the gym',
+              style: Theme.of(context).textTheme.titleLarge,
+              decoration: InputDecoration(
+                labelText: 'Title',
+                hintText: _nameHint,
               ),
               validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Give it a name' : null,
+                  (v == null || v.trim().isEmpty) ? 'Give it a title' : null,
               textInputAction: TextInputAction.next,
             ),
             const SizedBox(height: 16),
             TextFormField(
               controller: _descriptionController,
+              style: Theme.of(context).textTheme.bodyMedium,
               decoration: const InputDecoration(
                 labelText: 'Notes (optional)',
               ),
@@ -145,7 +176,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
                 ButtonSegment(value: HabitType.duration, label: Text('Duration')),
               ],
               selected: {_type},
-              onSelectionChanged: (s) => setState(() => _type = s.first),
+              onSelectionChanged: (s) => _onTypeChanged(s.first),
             ),
             if (_type != HabitType.boolean) ...[
               const SizedBox(height: 16),
@@ -154,13 +185,23 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
                   labelText: _type == HabitType.count
-                      ? 'Daily target (e.g. glasses)'
+                      ? 'Daily target (e.g. pages)'
                       : 'Daily target (minutes)',
                 ),
                 validator: (v) {
                   final n = int.tryParse(v ?? '');
                   return (n == null || n <= 0) ? 'Enter a number > 0' : null;
                 },
+              ),
+            ],
+            if (_type == HabitType.count) ...[
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _unitController,
+                decoration: const InputDecoration(
+                  labelText: 'Unit (optional)',
+                  hintText: 'e.g. pages, glasses, reps',
+                ),
               ),
             ],
             const SizedBox(height: 24),
@@ -174,7 +215,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
                 ),
                 ButtonSegment(
                   value: HabitFrequency.weekly,
-                  label: Text('X times / week'),
+                  label: Text('Weekly'),
                 ),
               ],
               selected: {_frequency},
@@ -228,7 +269,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final icon in _iconChoices)
+                for (final icon in habitIconChoices)
                   _PickerChip(
                     selected: icon == _icon,
                     color: _color,
@@ -246,7 +287,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
               children: [
                 for (final color in _colorChoices)
                   _PickerChip(
-                    selected: color.toARGB32() == _color.toARGB32(),
+                    selected: color.value == _color.value,
                     color: color,
                     child: CircleAvatar(backgroundColor: color, radius: 12),
                     onTap: () => setState(() => _color = color),

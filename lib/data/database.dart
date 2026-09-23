@@ -8,7 +8,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._internal();
 
   static const _dbName = 'habits_app.db';
-  static const _dbVersion = 5;
+  static const _dbVersion = 7;
 
   Database? _db;
 
@@ -17,9 +17,16 @@ class AppDatabase {
     return _db!;
   }
 
-  Future<Database> _open() async {
+  /// The database file's path on disk — used by [BackupService] to
+  /// locate the live file for export/restore without duplicating this
+  /// path logic.
+  Future<String> get databasePath async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, _dbName);
+    return join(dbPath, _dbName);
+  }
+
+  Future<Database> _open() async {
+    final path = await databasePath;
     return openDatabase(
       path,
       version: _dbVersion,
@@ -41,6 +48,7 @@ class AppDatabase {
         target_per_week INTEGER NOT NULL DEFAULT 7,
         type TEXT NOT NULL DEFAULT 'boolean',
         daily_target INTEGER,
+        unit TEXT,
         tolerance_per_month INTEGER NOT NULL DEFAULT 0,
         color INTEGER NOT NULL,
         icon_code_point INTEGER NOT NULL,
@@ -63,16 +71,28 @@ class AppDatabase {
     ''');
 
     await db.execute('''
+      CREATE TABLE project_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE projects (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         description TEXT,
-        category TEXT,
+        category_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'ongoing',
+        parent_id INTEGER,
         goal_minutes_per_week INTEGER,
         color INTEGER NOT NULL,
         created_at TEXT NOT NULL,
         archived INTEGER NOT NULL DEFAULT 0,
-        sort_order INTEGER NOT NULL DEFAULT 0
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (category_id) REFERENCES project_categories (id) ON DELETE SET NULL,
+        FOREIGN KEY (parent_id) REFERENCES projects (id) ON DELETE SET NULL
       )
     ''');
 
@@ -89,14 +109,18 @@ class AppDatabase {
       )
     ''');
 
+    // A single task can either belong to a project (its checklist) or
+    // stand alone as a general to-do (project_id null) — see
+    // lib/models/task.dart.
     await db.execute('''
-      CREATE TABLE project_tasks (
+      CREATE TABLE tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        project_id INTEGER NOT NULL,
+        project_id INTEGER,
         name TEXT NOT NULL,
         completed INTEGER NOT NULL DEFAULT 0,
         sort_order INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
+        due_date TEXT,
         FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
       )
     ''');
@@ -105,8 +129,23 @@ class AppDatabase {
         'CREATE INDEX idx_habit_logs_habit_id ON habit_logs (habit_id)');
     await db.execute(
         'CREATE INDEX idx_time_entries_project_id ON time_entries (project_id)');
+    await db.execute('CREATE INDEX idx_tasks_project_id ON tasks (project_id)');
     await db.execute(
-        'CREATE INDEX idx_project_tasks_project_id ON project_tasks (project_id)');
+        'CREATE INDEX idx_projects_category_id ON projects (category_id)');
+    await db.execute(
+        'CREATE INDEX idx_projects_parent_id ON projects (parent_id)');
+
+    await _seedDefaultCategories(db);
+  }
+
+  /// The starting set of project types — the user can rename, add to,
+  /// or delete these freely from Settings; this just saves them typing
+  /// the obvious ones on a fresh install.
+  Future<void> _seedDefaultCategories(Database db) async {
+    const defaults = ['Course', 'Research', 'Side project', 'Personal', 'Work'];
+    for (var i = 0; i < defaults.length; i++) {
+      await db.insert('project_categories', {'name': defaults[i], 'sort_order': i});
+    }
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -177,6 +216,91 @@ class AppDatabase {
       ''');
       await db.execute(
           'CREATE INDEX idx_project_tasks_project_id ON project_tasks (project_id)');
+    }
+
+    if (oldVersion < 6) {
+      // Project types become a user-managed table (add/rename/delete
+      // your own) instead of a free-text field; a status independent
+      // of archiving (ongoing/on hold/completed); a project can
+      // optionally nest under a parent project; and the per-project
+      // checklist becomes a general task that can also stand alone
+      // with no project (the new "To-dos" tab).
+      await db.execute('''
+        CREATE TABLE project_categories (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          sort_order INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+      await _seedDefaultCategories(db);
+
+      await db.execute('ALTER TABLE projects ADD COLUMN category_id INTEGER '
+          'REFERENCES project_categories (id) ON DELETE SET NULL');
+      await db.execute(
+          "ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'ongoing'");
+      await db.execute('ALTER TABLE projects ADD COLUMN parent_id INTEGER '
+          'REFERENCES projects (id) ON DELETE SET NULL');
+      await db.execute(
+          'CREATE INDEX idx_projects_category_id ON projects (category_id)');
+      await db.execute(
+          'CREATE INDEX idx_projects_parent_id ON projects (parent_id)');
+
+      // Fold each existing free-text `category` value into the new
+      // table (deduped, case-sensitive exact match) and point each
+      // project at its matching row. The old `category` column is left
+      // in place afterward, unused — sqflite's bundled SQLite version
+      // isn't guaranteed new enough for DROP COLUMN, and an unused
+      // nullable column is harmless.
+      final distinctCategories = await db.rawQuery(
+        "SELECT DISTINCT category FROM projects "
+        "WHERE category IS NOT NULL AND TRIM(category) != ''",
+      );
+      for (final row in distinctCategories) {
+        final name = (row['category'] as String).trim();
+        final existing = await db.query('project_categories',
+            where: 'name = ?', whereArgs: [name], limit: 1);
+        final categoryId = existing.isNotEmpty
+            ? existing.first['id'] as int
+            : await db.insert('project_categories', {
+                'name': name,
+                'sort_order':
+                    Sqflite.firstIntValue(await db.rawQuery(
+                            'SELECT COALESCE(MAX(sort_order), -1) + 1 AS n '
+                            'FROM project_categories')) ??
+                        0,
+              });
+        await db.update('projects', {'category_id': categoryId},
+            where: 'category = ?', whereArgs: [name]);
+      }
+
+      // project_tasks -> tasks: same shape, but project_id becomes
+      // nullable so a task can stand alone. SQLite can't relax a NOT
+      // NULL constraint in place, so recreate the table and copy over.
+      await db.execute('''
+        CREATE TABLE tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER,
+          name TEXT NOT NULL,
+          completed INTEGER NOT NULL DEFAULT 0,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+        )
+      ''');
+      await db.execute(
+          'INSERT INTO tasks (id, project_id, name, completed, sort_order, created_at) '
+          'SELECT id, project_id, name, completed, sort_order, created_at FROM project_tasks');
+      await db.execute('DROP TABLE project_tasks');
+      await db.execute('CREATE INDEX idx_tasks_project_id ON tasks (project_id)');
+    }
+
+    if (oldVersion < 7) {
+      // A custom unit word for count habits (e.g. "pages" instead of
+      // the generic "x"), and an optional due date on a task so the
+      // standalone to-do list can order itself and tuck future items
+      // behind "Tasks for later".
+      await db.execute('ALTER TABLE habits ADD COLUMN unit TEXT');
+      await db.execute('ALTER TABLE tasks ADD COLUMN due_date TEXT');
     }
   }
 

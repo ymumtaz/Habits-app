@@ -27,6 +27,38 @@ HabitType habitTypeFromString(String value) {
   );
 }
 
+/// The fixed set of icons a habit can use. Kept as a single canonical
+/// list (rather than constructing `IconData` from a stored code point
+/// directly) so every reference to a habit's icon in source is a
+/// literal `Icons.xxx` — required for Flutter's icon font tree-shaking
+/// to know which glyphs to keep in a release build. See
+/// [iconForCodePoint] for how a stored code point maps back to one of
+/// these.
+const List<IconData> habitIconChoices = <IconData>[
+  Icons.check_circle_outline,
+  Icons.fitness_center,
+  Icons.local_drink,
+  Icons.menu_book,
+  Icons.phone_iphone,
+  Icons.bedtime,
+  Icons.self_improvement,
+  Icons.directions_run,
+];
+
+/// Maps a code point loaded from the database back to one of
+/// [habitIconChoices] — a `switch` over a fixed set of literal
+/// `Icons.xxx` values, rather than constructing `IconData` from the
+/// runtime [codePoint] directly, so the icon font can still be
+/// tree-shaken in release builds. Falls back to the default icon for
+/// a code point that doesn't match any current choice (e.g. old data
+/// from a since-removed option).
+IconData iconForCodePoint(int codePoint) {
+  for (final icon in habitIconChoices) {
+    if (icon.codePoint == codePoint) return icon;
+  }
+  return Icons.check_circle_outline;
+}
+
 /// A single habit definition, e.g. "Go to the gym" or "Drink water".
 ///
 /// For [HabitFrequency.daily] habits, the streak is counted in
@@ -48,6 +80,14 @@ class Habit {
   final int targetPerWeek;
   final HabitType type;
   final int? dailyTarget;
+
+  /// A custom unit word for a [HabitType.count] habit, e.g. "pages" or
+  /// "glasses" — shown instead of the generic "x" wherever a count is
+  /// displayed (the habit card's daily progress, the log dialog, ...).
+  /// Null or blank falls back to "x". Not used for [HabitType.duration]
+  /// habits, which always show "min".
+  final String? unit;
+
   final int tolerancePerMonth;
   final Color color;
   final IconData icon;
@@ -62,6 +102,7 @@ class Habit {
     this.targetPerWeek = 7,
     this.type = HabitType.boolean,
     this.dailyTarget,
+    this.unit,
     this.tolerancePerMonth = 0,
     this.color = Colors.teal,
     this.icon = Icons.check_circle_outline,
@@ -70,10 +111,12 @@ class Habit {
   });
 
   /// The unit label shown next to amounts for count/duration habits,
-  /// e.g. "glasses" or "min". Empty for boolean habits.
+  /// e.g. "pages" or "min". Empty for boolean habits.
   String get unitLabel => switch (type) {
         HabitType.boolean => '',
-        HabitType.count => 'x',
+        HabitType.count => (unit != null && unit!.trim().isNotEmpty)
+            ? unit!.trim()
+            : 'x',
         HabitType.duration => 'min',
       };
 
@@ -86,6 +129,8 @@ class Habit {
     HabitType? type,
     int? dailyTarget,
     bool clearDailyTarget = false,
+    String? unit,
+    bool clearUnit = false,
     int? tolerancePerMonth,
     Color? color,
     IconData? icon,
@@ -101,6 +146,7 @@ class Habit {
       type: type ?? this.type,
       dailyTarget:
           clearDailyTarget ? null : (dailyTarget ?? this.dailyTarget),
+      unit: clearUnit ? null : (unit ?? this.unit),
       tolerancePerMonth: tolerancePerMonth ?? this.tolerancePerMonth,
       color: color ?? this.color,
       icon: icon ?? this.icon,
@@ -118,8 +164,9 @@ class Habit {
       'target_per_week': targetPerWeek,
       'type': type.name,
       'daily_target': dailyTarget,
+      'unit': unit,
       'tolerance_per_month': tolerancePerMonth,
-      'color': color.toARGB32(),
+      'color': color.value,
       'icon_code_point': icon.codePoint,
       'created_at': createdAt.toIso8601String(),
       'archived': archived ? 1 : 0,
@@ -135,10 +182,10 @@ class Habit {
       targetPerWeek: map['target_per_week'] as int? ?? 7,
       type: habitTypeFromString(map['type'] as String? ?? 'boolean'),
       dailyTarget: map['daily_target'] as int?,
+      unit: map['unit'] as String?,
       tolerancePerMonth: map['tolerance_per_month'] as int? ?? 0,
       color: Color(map['color'] as int),
-      icon: IconData(map['icon_code_point'] as int,
-          fontFamily: 'MaterialIcons'),
+      icon: iconForCodePoint(map['icon_code_point'] as int),
       createdAt: DateTime.parse(map['created_at'] as String),
       archived: (map['archived'] as int? ?? 0) == 1,
     );

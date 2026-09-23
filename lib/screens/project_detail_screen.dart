@@ -9,7 +9,7 @@ import '../models/time_entry.dart';
 import '../utils/duration_format.dart';
 import '../widgets/add_manual_entry_dialog.dart';
 import '../widgets/confirm_dialog.dart';
-import '../widgets/project_task_list.dart';
+import '../widgets/task_checklist.dart';
 import '../widgets/undo_snackbar.dart';
 import 'add_edit_project_screen.dart';
 
@@ -34,6 +34,9 @@ class ProjectDetailScreen extends StatelessWidget {
         DateFormat(use24Hour ? 'EEE, MMM d · HH:mm' : 'EEE, MMM d · h:mm a');
     final goal = current.goalMinutesPerWeek;
     final weeklyMinutes = provider.weeklyDurationFor(current).inMinutes;
+    final categoryName = provider.categoryFor(current)?.name;
+    final parent = provider.parentOf(current);
+    final children = provider.childrenOf(current);
 
     return Scaffold(
       appBar: AppBar(
@@ -102,15 +105,50 @@ class ProjectDetailScreen extends StatelessWidget {
               color: current.color,
             ),
           ],
-          if (current.category != null && current.category!.isNotEmpty) ...[
+          if (categoryName != null || parent != null) ...[
             const SizedBox(height: 12),
             Center(
-              child: Chip(
-                label: Text(current.category!),
-                visualDensity: VisualDensity.compact,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  if (categoryName != null)
+                    Chip(
+                      label: Text(categoryName),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  if (parent != null)
+                    ActionChip(
+                      avatar: const Icon(Icons.subdirectory_arrow_right, size: 16),
+                      label: Text('Part of ${parent.name}'),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ProjectDetailScreen(project: parent),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ],
+          const SizedBox(height: 16),
+          Center(
+            child: SegmentedButton<ProjectStatus>(
+              segments: const [
+                ButtonSegment(
+                    value: ProjectStatus.ongoing, label: Text('Ongoing')),
+                ButtonSegment(
+                    value: ProjectStatus.onHold, label: Text('On hold')),
+                ButtonSegment(
+                    value: ProjectStatus.completed, label: Text('Completed')),
+              ],
+              selected: {current.status},
+              onSelectionChanged: (selected) =>
+                  provider.setStatus(current, selected.first),
+            ),
+          ),
           const SizedBox(height: 24),
           if (!isActive)
             FilledButton.icon(
@@ -166,11 +204,30 @@ class ProjectDetailScreen extends StatelessWidget {
             label: const Text('Add a past session'),
           ),
           const SizedBox(height: 24),
-          ProjectTaskList(
-            project: current,
+          TaskChecklist(
             tasks: provider.tasksFor(current.id!),
-            provider: provider,
+            onAdd: (name) => provider.addTask(name, project: current),
+            onToggle: provider.toggleTask,
+            onDelete: provider.deleteTask,
           ),
+          if (children.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Text('Sub-projects', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            for (final child in children)
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.folder_outlined, color: child.color),
+                title: Text(child.name),
+                trailing: Text(formatDuration(provider.totalDurationFor(child))),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ProjectDetailScreen(project: child),
+                  ),
+                ),
+              ),
+          ],
           const SizedBox(height: 24),
           Text('Sessions', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
@@ -287,7 +344,7 @@ class _WeeklyGoalProgress extends StatelessWidget {
             value: progress,
             minHeight: 8,
             color: color,
-            backgroundColor: color.withValues(alpha: 0.15),
+            backgroundColor: color.withOpacity(0.15),
           ),
         ),
         const SizedBox(height: 4),

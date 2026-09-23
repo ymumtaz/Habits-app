@@ -1,5 +1,27 @@
 import 'package:flutter/material.dart';
 
+/// Where a project currently stands. Independent of [Project.archived]
+/// — archiving hides a project from the main list entirely, while
+/// status is just a visible label on an otherwise-active project (a
+/// finished thesis can stay [completed] and visible for a while before
+/// you decide to archive it).
+enum ProjectStatus { ongoing, onHold, completed }
+
+ProjectStatus projectStatusFromString(String value) {
+  return ProjectStatus.values.firstWhere(
+    (s) => s.name == value,
+    orElse: () => ProjectStatus.ongoing,
+  );
+}
+
+extension ProjectStatusLabel on ProjectStatus {
+  String get label => switch (this) {
+        ProjectStatus.ongoing => 'Ongoing',
+        ProjectStatus.onHold => 'On hold',
+        ProjectStatus.completed => 'Completed',
+      };
+}
+
 /// A project you're tracking time against, e.g. "Master's thesis" or
 /// "Side project X". This is the unit the time-tracking archive is
 /// built around.
@@ -8,9 +30,16 @@ class Project {
   final String name;
   final String? description;
 
-  /// A free-text tag/category, e.g. "Coursework", "Research", "Personal"
-  /// — lets you group and filter projects. Optional.
-  final String? category;
+  /// Which [ProjectCategory] this project is tagged with, if any —
+  /// see `data/project_provider.dart`'s `categoryFor`.
+  final int? categoryId;
+
+  final ProjectStatus status;
+
+  /// Another project this one nests under, e.g. "Chapter 1" under
+  /// "Master's thesis". Null for a top-level project. A project can
+  /// have at most one parent (a tree, not a graph).
+  final int? parentId;
 
   /// An optional weekly time goal, in minutes — e.g. 300 for "5 hours a
   /// week". Null means no goal is set for this project.
@@ -23,7 +52,9 @@ class Project {
     this.id,
     required this.name,
     this.description,
-    this.category,
+    this.categoryId,
+    this.status = ProjectStatus.ongoing,
+    this.parentId,
     this.goalMinutesPerWeek,
     this.color = Colors.indigo,
     required this.createdAt,
@@ -35,8 +66,11 @@ class Project {
     String? name,
     String? description,
     bool clearDescription = false,
-    String? category,
-    bool clearCategory = false,
+    int? categoryId,
+    bool clearCategoryId = false,
+    ProjectStatus? status,
+    int? parentId,
+    bool clearParentId = false,
     int? goalMinutesPerWeek,
     bool clearGoal = false,
     Color? color,
@@ -48,7 +82,9 @@ class Project {
       name: name ?? this.name,
       description:
           clearDescription ? null : (description ?? this.description),
-      category: clearCategory ? null : (category ?? this.category),
+      categoryId: clearCategoryId ? null : (categoryId ?? this.categoryId),
+      status: status ?? this.status,
+      parentId: clearParentId ? null : (parentId ?? this.parentId),
       goalMinutesPerWeek:
           clearGoal ? null : (goalMinutesPerWeek ?? this.goalMinutesPerWeek),
       color: color ?? this.color,
@@ -62,9 +98,11 @@ class Project {
       'id': id,
       'name': name,
       'description': description,
-      'category': category,
+      'category_id': categoryId,
+      'status': status.name,
+      'parent_id': parentId,
       'goal_minutes_per_week': goalMinutesPerWeek,
-      'color': color.toARGB32(),
+      'color': color.value,
       'created_at': createdAt.toIso8601String(),
       'archived': archived ? 1 : 0,
     };
@@ -75,7 +113,9 @@ class Project {
       id: map['id'] as int?,
       name: map['name'] as String,
       description: map['description'] as String?,
-      category: map['category'] as String?,
+      categoryId: map['category_id'] as int?,
+      status: projectStatusFromString(map['status'] as String? ?? 'ongoing'),
+      parentId: map['parent_id'] as int?,
       goalMinutesPerWeek: map['goal_minutes_per_week'] as int?,
       color: Color(map['color'] as int),
       createdAt: DateTime.parse(map['created_at'] as String),

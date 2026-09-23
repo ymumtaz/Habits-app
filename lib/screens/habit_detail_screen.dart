@@ -4,12 +4,15 @@ import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
 import '../models/habit.dart';
+import '../services/streak_calculator.dart';
 import '../widgets/confirm_dialog.dart';
 import '../widgets/log_amount_dialog.dart';
+import '../widgets/milestone_badges.dart';
 import '../widgets/monthly_habit_calendar.dart';
 import '../widgets/streak_badge.dart';
 import '../widgets/streak_share_card.dart';
 import '../widgets/undo_snackbar.dart';
+import '../widgets/weekday_bar_chart.dart';
 import 'add_edit_habit_screen.dart';
 import 'year_heatmap_screen.dart';
 
@@ -87,12 +90,42 @@ Future<void> _logAmountFor(
   }
 }
 
-class HabitDetailScreen extends StatelessWidget {
+class HabitDetailScreen extends StatefulWidget {
   final Habit habit;
   const HabitDetailScreen({super.key, required this.habit});
 
   @override
+  State<HabitDetailScreen> createState() => _HabitDetailScreenState();
+}
+
+class _HabitDetailScreenState extends State<HabitDetailScreen> {
+  // Created once (not per build) so the RepaintBoundary it's attached
+  // to keeps a stable identity across rebuilds — recreating the key
+  // every build would force Flutter to tear down and rebuild the
+  // render object each time, which is wasteful and risks capturing
+  // mid-rebuild.
+  final _shareKey = GlobalKey();
+  bool _sharing = false;
+
+  Future<void> _share(Habit current, StreakResult streak) async {
+    if (_sharing) return;
+    setState(() => _sharing = true);
+    try {
+      await shareStreakCard(_shareKey, current, streak);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Couldn't share streak: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final habit = widget.habit;
     final provider = context.watch<HabitProvider>();
     // The habit list may have refreshed (e.g. after an edit); find the
     // freshest copy so edits show immediately, falling back to the
@@ -104,16 +137,21 @@ class HabitDetailScreen extends StatelessWidget {
     final streak = provider.streakFor(current);
     final isBoolean = current.type == HabitType.boolean;
     final todayAmount = provider.amountOn(current, DateTime.now());
-    final shareKey = GlobalKey();
 
     return Scaffold(
       appBar: AppBar(
         title: Text(current.name),
         actions: [
           IconButton(
-            icon: const Icon(Icons.ios_share),
+            icon: _sharing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.ios_share),
             tooltip: 'Share streak',
-            onPressed: () => shareStreakCard(shareKey, current, streak),
+            onPressed: _sharing ? null : () => _share(current, streak),
           ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
@@ -148,6 +186,12 @@ class HabitDetailScreen extends StatelessWidget {
         ],
       ),
       body: Stack(
+        // Positioned children land outside the Stack's own bounds by
+        // default clip, which is exactly what we want for the
+        // off-screen share-card render target below: still laid out
+        // and painted (unlike Offstage, which skips painting
+        // entirely and would leave the RepaintBoundary's layer empty,
+        // making capture fail silently), just never visible.
         children: [
           ListView(
             padding: const EdgeInsets.all(16),
@@ -164,6 +208,8 @@ class HabitDetailScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [StreakBadge(streak: streak.currentStreak, highlight: true)],
           ),
+          const SizedBox(height: 12),
+          MilestoneBadges(bestStreak: streak.bestStreak, color: current.color),
           if (current.tolerancePerMonth > 0) ...[
             const SizedBox(height: 4),
             Center(
@@ -200,6 +246,22 @@ class HabitDetailScreen extends StatelessWidget {
               ),
             ),
           const SizedBox(height: 24),
+          if (!isBoolean) ...[
+            Text('By day of the week',
+                style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 4),
+            Text(
+              'Average ${current.unitLabel} logged on each weekday.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            WeekdayBarChart(
+              logs: provider.rawLogsFor(current.id!),
+              color: current.color,
+              unitLabel: current.unitLabel,
+            ),
+            const SizedBox(height: 24),
+          ],
           Text('Monthly overview',
               style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 4),
@@ -236,12 +298,19 @@ class HabitDetailScreen extends StatelessWidget {
             ],
           ),
           // Off-screen render target for the "Share streak" button —
-          // never shown, only captured to an image on demand.
-          Offstage(
-            offstage: true,
-            child: RepaintBoundary(
-              key: shareKey,
-              child: StreakShareCard(habit: current, streak: streak),
+          // positioned far outside the viewport (not hidden with
+          // Offstage) so it's actually laid out *and painted*, which
+          // is required for RepaintBoundary.toImage() to capture
+          // anything. IgnorePointer keeps it from ever intercepting
+          // taps.
+          Positioned(
+            left: -9999,
+            top: 0,
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                key: _shareKey,
+                child: StreakShareCard(habit: current, streak: streak),
+              ),
             ),
           ),
         ],

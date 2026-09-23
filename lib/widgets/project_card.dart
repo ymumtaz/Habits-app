@@ -12,6 +12,10 @@ class ProjectCard extends StatelessWidget {
   final bool isRunning;
   final bool isPaused;
 
+  /// The name of [Project.categoryId]'s category, if any — resolved by
+  /// the caller since [Project] itself only stores the id.
+  final String? categoryName;
+
   /// Cycles the session: begins one if idle, pauses if running,
   /// resumes if paused.
   final VoidCallback onToggleTimer;
@@ -27,6 +31,7 @@ class ProjectCard extends StatelessWidget {
     required this.totalDuration,
     required this.isRunning,
     required this.isPaused,
+    this.categoryName,
     required this.onToggleTimer,
     required this.onEndSession,
     required this.onTap,
@@ -36,11 +41,16 @@ class ProjectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusLabel = isRunning
+    final timeLabel = isRunning
         ? 'Running · ${formatDuration(totalDuration)} total'
         : (isPaused
             ? 'Paused · ${formatDuration(totalDuration)} total'
             : '${formatDuration(totalDuration)} total');
+    final statusLabel = switch (project.status) {
+      ProjectStatus.ongoing => null,
+      ProjectStatus.onHold => 'On hold',
+      ProjectStatus.completed => 'Completed',
+    };
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -53,7 +63,7 @@ class ProjectCard extends StatelessWidget {
           child: Row(
             children: [
               CircleAvatar(
-                backgroundColor: project.color.withValues(alpha: 0.18),
+                backgroundColor: project.color.withOpacity(0.18),
                 foregroundColor: project.color,
                 child: const Icon(Icons.folder_outlined),
               ),
@@ -74,19 +84,18 @@ class ProjectCard extends StatelessWidget {
                                 ?.copyWith(fontWeight: FontWeight.w600),
                           ),
                         ),
-                        if (project.category != null &&
-                            project.category!.isNotEmpty) ...[
+                        if (categoryName != null) ...[
                           const SizedBox(width: 6),
                           Flexible(
                             child: Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
-                                color: project.color.withValues(alpha: 0.12),
+                                color: project.color.withOpacity(0.12),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
-                                project.category!,
+                                categoryName!,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context)
                                     .textTheme
@@ -96,11 +105,38 @@ class ProjectCard extends StatelessWidget {
                             ),
                           ),
                         ],
+                        if (statusLabel != null) ...[
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                statusLabel,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      statusLabel,
+                      timeLabel,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: _isActive ? project.color : null,
                             fontWeight:
@@ -122,7 +158,7 @@ class ProjectCard extends StatelessWidget {
                 ),
                 style: IconButton.styleFrom(
                   backgroundColor:
-                      _isActive ? project.color.withValues(alpha: 0.18) : null,
+                      _isActive ? project.color.withOpacity(0.18) : null,
                   foregroundColor: _isActive ? project.color : null,
                 ),
               ),

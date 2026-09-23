@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../data/project_provider.dart';
 import '../models/project.dart';
+import 'manage_categories_screen.dart';
 
 const _colorChoices = <Color>[
   Colors.indigo,
@@ -28,10 +29,12 @@ class _AddEditProjectScreenState extends State<AddEditProjectScreen> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
-  late TextEditingController _categoryController;
   late TextEditingController _goalHoursController;
   late bool _hasGoal;
   late Color _color;
+  int? _categoryId;
+  late ProjectStatus _status;
+  int? _parentId;
 
   bool get _isEditing => widget.existing != null;
 
@@ -42,7 +45,6 @@ class _AddEditProjectScreenState extends State<AddEditProjectScreen> {
     _nameController = TextEditingController(text: p?.name ?? '');
     _descriptionController =
         TextEditingController(text: p?.description ?? '');
-    _categoryController = TextEditingController(text: p?.category ?? '');
     _hasGoal = p?.goalMinutesPerWeek != null;
     _goalHoursController = TextEditingController(
       text: p?.goalMinutesPerWeek != null
@@ -50,13 +52,15 @@ class _AddEditProjectScreenState extends State<AddEditProjectScreen> {
           : '5',
     );
     _color = p?.color ?? _colorChoices.first;
+    _categoryId = p?.categoryId;
+    _status = p?.status ?? ProjectStatus.ongoing;
+    _parentId = p?.parentId;
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _descriptionController.dispose();
-    _categoryController.dispose();
     _goalHoursController.dispose();
     super.dispose();
   }
@@ -65,7 +69,6 @@ class _AddEditProjectScreenState extends State<AddEditProjectScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     final provider = context.read<ProjectProvider>();
-    final category = _categoryController.text.trim();
     final goalHours = double.tryParse(_goalHoursController.text);
     final goalMinutes =
         (_hasGoal && goalHours != null && goalHours > 0)
@@ -80,8 +83,11 @@ class _AddEditProjectScreenState extends State<AddEditProjectScreen> {
           ? null
           : _descriptionController.text.trim(),
       clearDescription: _descriptionController.text.trim().isEmpty,
-      category: category.isEmpty ? null : category,
-      clearCategory: category.isEmpty,
+      categoryId: _categoryId,
+      clearCategoryId: _categoryId == null,
+      status: _status,
+      parentId: _parentId,
+      clearParentId: _parentId == null,
       goalMinutesPerWeek: goalMinutes,
       clearGoal: goalMinutes == null,
       color: _color,
@@ -98,6 +104,18 @@ class _AddEditProjectScreenState extends State<AddEditProjectScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ProjectProvider>();
+    final categories = provider.categories;
+    // A category the project was tagged with, but that's since been
+    // deleted, shouldn't still show as selected in the dropdown.
+    if (_categoryId != null && categories.every((c) => c.id != _categoryId)) {
+      _categoryId = null;
+    }
+    final eligibleParents = provider.eligibleParents(widget.existing);
+    if (_parentId != null && eligibleParents.every((p) => p.id != _parentId)) {
+      _parentId = null;
+    }
+
     return Scaffold(
       appBar: AppBar(title: Text(_isEditing ? 'Edit project' : 'New project')),
       body: Form(
@@ -124,12 +142,67 @@ class _AddEditProjectScreenState extends State<AddEditProjectScreen> {
               maxLines: 2,
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _categoryController,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int?>(
+                    value: _categoryId,
+                    decoration: const InputDecoration(labelText: 'Type'),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('None')),
+                      for (final category in categories)
+                        DropdownMenuItem(
+                          value: category.id,
+                          child: Text(category.name),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => _categoryId = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined),
+                  tooltip: 'Manage categories',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ManageCategoriesScreen(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text('Status', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            SegmentedButton<ProjectStatus>(
+              segments: const [
+                ButtonSegment(
+                    value: ProjectStatus.ongoing, label: Text('Ongoing')),
+                ButtonSegment(
+                    value: ProjectStatus.onHold, label: Text('On hold')),
+                ButtonSegment(
+                    value: ProjectStatus.completed, label: Text('Completed')),
+              ],
+              selected: {_status},
+              onSelectionChanged: (selected) =>
+                  setState(() => _status = selected.first),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<int?>(
+              value: _parentId,
               decoration: const InputDecoration(
-                labelText: 'Tag / category (optional)',
-                hintText: 'e.g. Coursework, Research, Personal',
+                labelText: 'Parent project (optional)',
+                helperText: 'Nest this under another project, e.g. a '
+                    'chapter under a thesis',
+                helperMaxLines: 2,
               ),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('None')),
+                for (final p in eligibleParents)
+                  DropdownMenuItem(value: p.id, child: Text(p.name)),
+              ],
+              onChanged: (v) => setState(() => _parentId = v),
             ),
             const SizedBox(height: 24),
             SwitchListTile(
@@ -169,7 +242,7 @@ class _AddEditProjectScreenState extends State<AddEditProjectScreen> {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: color.toARGB32() == _color.toARGB32()
+                          color: color.value == _color.value
                               ? color
                               : Colors.transparent,
                           width: 2,

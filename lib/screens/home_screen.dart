@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
+import '../data/project_provider.dart';
 import '../models/habit.dart';
 import '../widgets/habit_card.dart';
 import '../widgets/habit_summary_card.dart';
@@ -11,6 +12,7 @@ import 'add_edit_habit_screen.dart';
 import 'appearance_screen.dart';
 import 'habit_detail_screen.dart';
 import 'insights_screen.dart';
+import 'todos_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -18,11 +20,24 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<HabitProvider>();
+    final projectProvider = context.watch<ProjectProvider>();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Habits'),
         actions: [
+          IconButton(
+            icon: projectProvider.todayTaskCount > 0
+                ? Badge(
+                    label: Text('${projectProvider.todayTaskCount}'),
+                    child: const Icon(Icons.checklist_outlined),
+                  )
+                : const Icon(Icons.checklist_outlined),
+            tooltip: 'To-dos',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TodosScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Settings',
@@ -32,7 +47,7 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: _buildBody(context, provider),
+      body: _buildBody(context, provider, projectProvider),
       floatingActionButton: FloatingActionButton(
         onPressed: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const AddEditHabitScreen()),
@@ -42,7 +57,11 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildBody(BuildContext context, HabitProvider provider) {
+  Widget _buildBody(
+    BuildContext context,
+    HabitProvider provider,
+    ProjectProvider projectProvider,
+  ) {
     if (provider.isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -76,6 +95,9 @@ class HomeScreen extends StatelessWidget {
                   key: ValueKey(habit.id),
                   habit: habit,
                   streak: streak,
+                  todayAmount: habit.type == HabitType.boolean
+                      ? null
+                      : provider.amountOn(habit, DateTime.now()),
                   onToggleToday: () async {
                     if (habit.type == HabitType.boolean) {
                       provider.toggleToday(habit);
