@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -8,7 +9,34 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._internal();
 
   static const _dbName = 'habits_app.db';
-  static const _dbVersion = 7;
+  static const _dbVersion = 12;
+
+  /// The icon each seeded default category starts with — used both by
+  /// a fresh install's [_seedDefaultCategories] and to backfill an
+  /// icon onto these same five categories for anyone upgrading from
+  /// before categories had icons at all (see the `oldVersion < 9`
+  /// migration). Literal `Icons.xxx` values, same tree-shaking
+  /// reasoning as `categoryIconChoices` in `models/project_category.dart`.
+  static const _defaultCategoryIcons = <String, IconData>{
+    'Course': Icons.school_outlined,
+    'Research': Icons.science_outlined,
+    'Side project': Icons.rocket_launch_outlined,
+    'Personal': Icons.favorite_outline,
+    'Work': Icons.work_outline,
+  };
+
+  /// The starting set of session tags — a plain list (unlike project
+  /// categories, no icon) seeded on both a fresh install and for
+  /// anyone upgrading, from Settings > Session tags. Add, rename, or
+  /// delete your own freely afterward.
+  static const _defaultSessionTags = <String>[
+    'Physics',
+    'Majorana',
+    'Coding',
+    'Studying',
+    'Reading',
+    'Literature review',
+  ];
 
   Database? _db;
 
@@ -48,6 +76,7 @@ class AppDatabase {
         target_per_week INTEGER NOT NULL DEFAULT 7,
         type TEXT NOT NULL DEFAULT 'boolean',
         daily_target INTEGER,
+        target_mode TEXT NOT NULL DEFAULT 'atLeast',
         unit TEXT,
         tolerance_per_month INTEGER NOT NULL DEFAULT 0,
         color INTEGER NOT NULL,
@@ -74,7 +103,8 @@ class AppDatabase {
       CREATE TABLE project_categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
-        sort_order INTEGER NOT NULL DEFAULT 0
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        icon_code_point INTEGER
       )
     ''');
 
@@ -102,9 +132,11 @@ class AppDatabase {
         project_id INTEGER NOT NULL,
         started_at TEXT NOT NULL,
         ended_at TEXT,
+        title TEXT,
         note TEXT,
         paused_at TEXT,
         paused_seconds INTEGER NOT NULL DEFAULT 0,
+        target_minutes INTEGER,
         FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
       )
     ''');
@@ -125,6 +157,27 @@ class AppDatabase {
       )
     ''');
 
+    // Session journal: a user-managed tag vocabulary (e.g. "Physics",
+    // "Coding") and a many-to-many join onto time_entries, since a
+    // single session can carry more than one tag at once.
+    await db.execute('''
+      CREATE TABLE session_tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE time_entry_tags (
+        time_entry_id INTEGER NOT NULL,
+        tag_id INTEGER NOT NULL,
+        PRIMARY KEY (time_entry_id, tag_id),
+        FOREIGN KEY (time_entry_id) REFERENCES time_entries (id) ON DELETE CASCADE,
+        FOREIGN KEY (tag_id) REFERENCES session_tags (id) ON DELETE CASCADE
+      )
+    ''');
+
     await db.execute(
         'CREATE INDEX idx_habit_logs_habit_id ON habit_logs (habit_id)');
     await db.execute(
@@ -134,17 +187,33 @@ class AppDatabase {
         'CREATE INDEX idx_projects_category_id ON projects (category_id)');
     await db.execute(
         'CREATE INDEX idx_projects_parent_id ON projects (parent_id)');
+    await db.execute(
+        'CREATE INDEX idx_time_entry_tags_tag_id ON time_entry_tags (tag_id)');
 
     await _seedDefaultCategories(db);
+    await _seedDefaultSessionTags(db);
   }
 
   /// The starting set of project types — the user can rename, add to,
   /// or delete these freely from Settings; this just saves them typing
   /// the obvious ones on a fresh install.
   Future<void> _seedDefaultCategories(Database db) async {
-    const defaults = ['Course', 'Research', 'Side project', 'Personal', 'Work'];
-    for (var i = 0; i < defaults.length; i++) {
-      await db.insert('project_categories', {'name': defaults[i], 'sort_order': i});
+    var i = 0;
+    for (final entry in _defaultCategoryIcons.entries) {
+      await db.insert('project_categories', {
+        'name': entry.key,
+        'sort_order': i,
+        'icon_code_point': entry.value.codePoint,
+      });
+      i++;
+    }
+  }
+
+  /// The starting set of session tags — see [_defaultSessionTags].
+  Future<void> _seedDefaultSessionTags(Database db) async {
+    for (var i = 0; i < _defaultSessionTags.length; i++) {
+      await db.insert('session_tags',
+          {'name': _defaultSessionTags[i], 'sort_order': i});
     }
   }
 
@@ -301,6 +370,87 @@ class AppDatabase {
       // behind "Tasks for later".
       await db.execute('ALTER TABLE habits ADD COLUMN unit TEXT');
       await db.execute('ALTER TABLE tasks ADD COLUMN due_date TEXT');
+    }
+
+    if (oldVersion < 8) {
+      // A session can now be started with a countdown length (default
+      // 25 min) instead of only an open-ended count-up timer — see the
+      // single "Start session" flow that replaced per-project timer
+      // buttons on the Projects list.
+      await db.execute('ALTER TABLE time_entries ADD COLUMN target_minutes INTEGER');
+    }
+
+    if (oldVersion < 9) {
+      // Each category now carries its own icon, picked from a wide
+      // set when creating (or editing) one — and a project's avatar
+      // is derived from its category's icon instead of a generic
+      // folder or a status-swapped icon (see `ProjectAvatar`).
+      //
+      // `oldVersion < 6`'s CREATE TABLE already includes this column
+      // for anyone jumping straight from an even older version, so
+      // only ALTER it in when the table exists but predates it.
+      if (oldVersion >= 6) {
+        await db.execute(
+            'ALTER TABLE project_categories ADD COLUMN icon_code_point INTEGER');
+      }
+      // Give the five seeded defaults a matching icon even for
+      // existing installs, so upgrading users see something better
+      // than the generic fallback folder immediately. Any other,
+      // user-created category is left with no icon (falls back to
+      // the default folder glyph) — there's no way to guess what
+      // they'd want.
+      for (final entry in _defaultCategoryIcons.entries) {
+        await db.update(
+          'project_categories',
+          {'icon_code_point': entry.value.codePoint},
+          where: 'name = ? AND icon_code_point IS NULL',
+          whereArgs: [entry.key],
+        );
+      }
+    }
+
+    if (oldVersion < 10) {
+      // A session can now carry a short journal note (already had a
+      // `note` column, just under-used) plus one or more tags (e.g.
+      // "Physics", "Coding") from a user-managed vocabulary, entered
+      // when ending a session or logging/editing a past one — see the
+      // new "End session" flow that replaced instantly stopping the
+      // timer with no confirmation at all.
+      await db.execute('''
+        CREATE TABLE session_tags (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          sort_order INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE time_entry_tags (
+          time_entry_id INTEGER NOT NULL,
+          tag_id INTEGER NOT NULL,
+          PRIMARY KEY (time_entry_id, tag_id),
+          FOREIGN KEY (time_entry_id) REFERENCES time_entries (id) ON DELETE CASCADE,
+          FOREIGN KEY (tag_id) REFERENCES session_tags (id) ON DELETE CASCADE
+        )
+      ''');
+      await db.execute(
+          'CREATE INDEX idx_time_entry_tags_tag_id ON time_entry_tags (tag_id)');
+      await _seedDefaultSessionTags(db);
+    }
+
+    if (oldVersion < 11) {
+      // A session can now carry a short title of its own — like a
+      // post's headline — separate from the longer freeform note, so a
+      // session reads at a glance instead of only by its timestamp.
+      await db.execute('ALTER TABLE time_entries ADD COLUMN title TEXT');
+    }
+
+    if (oldVersion < 12) {
+      // A count/duration habit's daily target can now be a ceiling to
+      // stay under (e.g. "under 60 min of screen time") instead of
+      // only a floor to reach — see Habit.targetMode. Existing habits
+      // all default to the original at-least-this-much behavior.
+      await db.execute(
+          "ALTER TABLE habits ADD COLUMN target_mode TEXT NOT NULL DEFAULT 'atLeast'");
     }
   }
 

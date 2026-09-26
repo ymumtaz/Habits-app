@@ -20,10 +20,19 @@ class SettingsProvider extends ChangeNotifier {
   static const _weeklyRecapWeekdayKey = 'weekly_recap_weekday';
   static const _weeklyRecapHourKey = 'weekly_recap_hour';
   static const _weeklyRecapMinuteKey = 'weekly_recap_minute';
+  static const _defaultCountdownMinutesKey = 'default_countdown_minutes';
+  static const _languageCodeKey = 'language_code';
 
   HabitFrequency _defaultHabitFrequency = HabitFrequency.daily;
   bool _use24HourTime = false;
   int _firstDayOfWeek = DateTime.monday;
+  int _defaultCountdownMinutes = 25;
+
+  /// 'en' or 'tr' — the app's display language. Also used to pick the
+  /// locale passed to `DateFormat`/`initializeDateFormatting` wherever
+  /// a date or weekday name is shown, so switching this affects both
+  /// UI copy and date formatting together.
+  String _languageCode = 'en';
 
   bool _dailyRecapEnabled = false;
   int _dailyRecapHour = 20;
@@ -39,6 +48,8 @@ class SettingsProvider extends ChangeNotifier {
   HabitFrequency get defaultHabitFrequency => _defaultHabitFrequency;
   bool get use24HourTime => _use24HourTime;
   int get firstDayOfWeek => _firstDayOfWeek;
+  int get defaultCountdownMinutes => _defaultCountdownMinutes;
+  String get languageCode => _languageCode;
 
   bool get dailyRecapEnabled => _dailyRecapEnabled;
   int get dailyRecapHour => _dailyRecapHour;
@@ -65,6 +76,9 @@ class SettingsProvider extends ChangeNotifier {
       _use24HourTime = prefs.getBool(_use24HourKey) ?? false;
       _firstDayOfWeek = prefs.getInt(_firstDayOfWeekKey) ?? DateTime.monday;
       WeekConfig.firstWeekday = _firstDayOfWeek;
+      _defaultCountdownMinutes =
+          prefs.getInt(_defaultCountdownMinutesKey) ?? 25;
+      _languageCode = prefs.getString(_languageCodeKey) ?? 'en';
 
       _dailyRecapEnabled = prefs.getBool(_dailyRecapEnabledKey) ?? false;
       _dailyRecapHour = prefs.getInt(_dailyRecapHourKey) ?? 20;
@@ -113,6 +127,31 @@ class SettingsProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_firstDayOfWeekKey, weekday);
+    } catch (_) {}
+  }
+
+  /// Pre-fills the countdown length whenever the "Start a session"
+  /// dialog opens (still freely adjustable per-session there). Clamped
+  /// to the same 5–480 minute range the dialog itself allows.
+  Future<void> setDefaultCountdownMinutes(int minutes) async {
+    final clamped = minutes.clamp(5, 480).toInt();
+    if (clamped == _defaultCountdownMinutes) return;
+    _defaultCountdownMinutes = clamped;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_defaultCountdownMinutesKey, clamped);
+    } catch (_) {}
+  }
+
+  /// Switches the app's display language. [code] is 'en' or 'tr'.
+  Future<void> setLanguageCode(String code) async {
+    if (code == _languageCode) return;
+    _languageCode = code;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_languageCodeKey, code);
     } catch (_) {}
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/task.dart';
 
 /// A checklist of [Task]s — purely organizational (done/not-done);
@@ -9,7 +10,10 @@ import '../models/task.dart';
 /// project's own checklist (on its detail screen) and the standalone
 /// "To-dos" list (tasks with no project).
 class TaskChecklist extends StatefulWidget {
-  final String title;
+  /// Defaults to the localized "Tasks" when omitted. Pass '' to hide
+  /// the header row entirely (e.g. the collapsed "Tasks for later"
+  /// section, which shows its own header above this widget).
+  final String? title;
   final List<Task> tasks;
   final ValueChanged<String> onAdd;
   final ValueChanged<Task> onToggle;
@@ -20,7 +24,8 @@ class TaskChecklist extends StatefulWidget {
   /// doesn't use due dates).
   final void Function(Task task, DateTime? dueDate)? onSetDueDate;
 
-  final String addHint;
+  /// Defaults to the localized "Add a task" when omitted.
+  final String? addHint;
 
   /// Whether to show the add-a-task row at the bottom. Set false for
   /// a read-only list, e.g. the collapsed "Tasks for later" section,
@@ -29,13 +34,13 @@ class TaskChecklist extends StatefulWidget {
 
   const TaskChecklist({
     super.key,
-    this.title = 'Tasks',
+    this.title,
     required this.tasks,
     required this.onAdd,
     required this.onToggle,
     required this.onDelete,
     this.onSetDueDate,
-    this.addHint = 'Add a task',
+    this.addHint,
     this.showAddRow = true,
   });
 
@@ -70,30 +75,37 @@ class _TaskChecklistState extends State<TaskChecklist> {
     if (picked != null) widget.onSetDueDate?.call(task, picked);
   }
 
-  String _dueLabel(DateTime due) {
+  /// Returns the due-date label and whether it reads as overdue —
+  /// returned together (rather than encoding "overdue" as a string
+  /// prefix) so the caller never has to pattern-match localized text.
+  (String, bool) _dueLabel(AppLocalizations t, DateTime due) {
     final today = DateTime.now();
     final todayOnly = DateTime(today.year, today.month, today.day);
     final dueOnly = DateTime(due.year, due.month, due.day);
     final diff = dueOnly.difference(todayOnly).inDays;
-    if (diff == 0) return 'Today';
-    if (diff == 1) return 'Tomorrow';
-    if (diff == -1) return 'Yesterday';
-    if (diff < 0) return 'Overdue · ${DateFormat('MMM d').format(due)}';
-    return DateFormat('MMM d').format(due);
+    if (diff == 0) return (t.dueToday, false);
+    if (diff == 1) return (t.dueTomorrow, false);
+    if (diff == -1) return (t.dueYesterday, false);
+    final formatted = DateFormat('MMM d', t.locale.languageCode).format(due);
+    if (diff < 0) return (t.overdueLabel(formatted), true);
+    return (formatted, false);
   }
 
   @override
   Widget build(BuildContext context) {
     final tasks = widget.tasks;
     final done = tasks.where((t) => t.completed).length;
+    final t = context.l10n;
+    final title = widget.title ?? t.tasksTooltip;
+    final addHint = widget.addHint ?? t.addATask;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (widget.title.isNotEmpty) ...[
+        if (title.isNotEmpty) ...[
           Row(
             children: [
-              Text(widget.title, style: Theme.of(context).textTheme.titleSmall),
+              Text(title, style: Theme.of(context).textTheme.titleSmall),
               if (tasks.isNotEmpty) ...[
                 const SizedBox(width: 8),
                 Text(
@@ -131,9 +143,8 @@ class _TaskChecklistState extends State<TaskChecklist> {
               ),
               subtitle: task.dueDate != null
                   ? Builder(builder: (context) {
-                      final label = _dueLabel(task.dueDate!);
-                      final isOverdue =
-                          !task.completed && label.startsWith('Overdue');
+                      final (label, isOverdueLabel) = _dueLabel(t, task.dueDate!);
+                      final isOverdue = !task.completed && isOverdueLabel;
                       return Text(
                         label,
                         style: isOverdue
@@ -146,8 +157,8 @@ class _TaskChecklistState extends State<TaskChecklist> {
                   ? null
                   : Tooltip(
                       message: task.dueDate != null
-                          ? 'Change date (long-press to clear)'
-                          : 'Set a date',
+                          ? t.changeDateTooltip
+                          : t.setDateTooltip,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(20),
                         onTap: () => _pickDueDate(task),
@@ -174,7 +185,7 @@ class _TaskChecklistState extends State<TaskChecklist> {
                 child: TextField(
                   controller: _controller,
                   decoration: InputDecoration(
-                    hintText: widget.addHint,
+                    hintText: addHint,
                     isDense: true,
                   ),
                   onSubmitted: (_) => _add(),
@@ -182,7 +193,7 @@ class _TaskChecklistState extends State<TaskChecklist> {
               ),
               IconButton(
                 icon: const Icon(Icons.add),
-                tooltip: 'Add task',
+                tooltip: t.addTaskTooltip,
                 onPressed: _add,
               ),
             ],

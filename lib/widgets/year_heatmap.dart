@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
+
 /// A GitHub-contributions-style grid of the last [weeks] weeks, most
 /// recent week first (left) so the interesting part is visible without
 /// scrolling. Deliberately NOT anchored to Jan 1 — a calendar-year grid
@@ -97,7 +99,7 @@ class _WeekColumn extends StatelessWidget {
           height: 14,
           child: showMonthLabel
               ? Text(
-                  DateFormat('MMM').format(days.first),
+                  DateFormat('MMM', context.l10n.locale.languageCode).format(days.first),
                   style: Theme.of(context).textTheme.labelSmall,
                 )
               : null,
@@ -137,7 +139,7 @@ class _Cell extends StatelessWidget {
       decoration: BoxDecoration(
         color: isFuture
             ? Colors.transparent
-            : (filled ? color : color.withValues(alpha: 0.08)),
+            : (filled ? color : color.withOpacity(0.08)),
         border: isFuture ? null : Border.all(color: outline, width: 0.5),
         borderRadius: BorderRadius.circular(3),
       ),

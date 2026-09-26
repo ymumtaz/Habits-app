@@ -4,7 +4,9 @@
 // Run with: flutter test test/habit_card_test.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:habits_app/l10n/app_localizations.dart';
 import 'package:habits_app/models/habit.dart';
 import 'package:habits_app/services/streak_calculator.dart';
 import 'package:habits_app/widgets/habit_card.dart';
@@ -30,6 +32,16 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        // HabitCard reads context.l10n (AppLocalizations) since Turkish
+        // localization — without these delegates that lookup finds
+        // nothing and throws before the widget ever renders.
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           body: HabitCard(
             habit: habit,

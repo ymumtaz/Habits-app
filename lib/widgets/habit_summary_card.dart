@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../utils/habit_stats.dart';
 
 /// A compact card at the top of the home screen showing this month's
@@ -34,15 +35,14 @@ class HabitSummaryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '$percent% this month',
+                      context.l10n.percentThisMonth(percent),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Overall completion across ${stats.length} habit'
-                      '${stats.length == 1 ? '' : 's'}',
+                      context.l10n.overallCompletionAcross(stats.length),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],

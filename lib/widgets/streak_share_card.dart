@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/habit.dart';
 import '../services/streak_calculator.dart';
 
@@ -34,7 +35,7 @@ class StreakShareCard extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [habit.color, habit.color.withValues(alpha: 0.6)],
+            colors: [habit.color, habit.color.withOpacity(0.6)],
           ),
         ),
         child: Column(
@@ -44,7 +45,7 @@ class StreakShareCard extends StatelessWidget {
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: Colors.white.withValues(alpha: 0.25),
+                  backgroundColor: Colors.white.withOpacity(0.25),
                   radius: 22,
                   child: Icon(habit.icon, color: Colors.white),
                 ),
@@ -82,16 +83,16 @@ class StreakShareCard extends StatelessWidget {
               ],
             ),
             Text(
-              'day streak',
+              context.l10n.dayStreak,
               style:
-                  TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 16),
+                  TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 16),
             ),
             const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _StatColumn(label: 'Best streak', value: '${streak.bestStreak}'),
-                _StatColumn(label: 'Streak score', value: '${streak.score}'),
+                _StatColumn(label: context.l10n.bestStreak, value: '${streak.bestStreak}'),
+                _StatColumn(label: context.l10n.consistencyScoreLabel, value: '${streak.consistencyScore}'),
               ],
             ),
             const SizedBox(height: 20),
@@ -100,7 +101,7 @@ class StreakShareCard extends StatelessWidget {
               child: Text(
                 'HABITS',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
+                  color: Colors.white.withOpacity(0.7),
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 1.2,
@@ -130,7 +131,7 @@ class _StatColumn extends StatelessWidget {
               color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
         ),
         Text(label,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12)),
+            style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12)),
       ],
     );
   }
@@ -143,6 +144,7 @@ Future<void> shareStreakCard(
   GlobalKey boundaryKey,
   Habit habit,
   StreakResult streak,
+  AppLocalizations t,
 ) async {
   final boundary = boundaryKey.currentContext?.findRenderObject()
       as RenderRepaintBoundary?;
@@ -161,6 +163,6 @@ Future<void> shareStreakCard(
 
   await Share.shareXFiles(
     [XFile(file.path)],
-    text: 'My "${habit.name}" streak: ${streak.currentStreak} days.',
+    text: t.shareStreakText(habit.name, streak.currentStreak),
   );
 }

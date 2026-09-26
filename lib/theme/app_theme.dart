@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+
 /// The set of selectable app themes. [system] follows the OS light/dark
 /// setting using the default teal palette; the rest are fixed looks the
 /// user can pick regardless of OS setting.
 enum AppThemeOption { system, light, dark, navyTeal, pink, green }
 
 extension AppThemeOptionLabel on AppThemeOption {
-  String get label => switch (this) {
-        AppThemeOption.system => 'System default',
-        AppThemeOption.light => 'Light',
-        AppThemeOption.dark => 'Dark',
-        AppThemeOption.navyTeal => 'Navy & Teal',
-        AppThemeOption.pink => 'Light Pink',
-        AppThemeOption.green => 'Green',
+  String label(AppLocalizations t) => switch (this) {
+        AppThemeOption.system => t.themeSystemDefault,
+        AppThemeOption.light => t.themeLight,
+        AppThemeOption.dark => t.themeDark,
+        AppThemeOption.navyTeal => t.themeNavyTeal,
+        AppThemeOption.pink => t.themeLightPink,
+        AppThemeOption.green => t.themeGreen,
       };
 
   /// A representative color for showing a little swatch next to the

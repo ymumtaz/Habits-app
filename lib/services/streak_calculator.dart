@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../models/habit.dart';
 import '../models/habit_log.dart';
 import '../utils/week_config.dart';
@@ -15,11 +17,20 @@ class StreakResult {
   final int completionsThisPeriod;
   final bool completedToday;
 
+  /// A 0-100 "how consistently is this habit actually being kept"
+  /// score — see [StreakCalculator]'s scoring section for the formula.
+  /// Unlike [currentStreak]/[bestStreak], this isn't a streak count at
+  /// all: it blends how close you are to your target lately with how
+  /// long you've sustained that, so it moves smoothly instead of
+  /// swinging with every streak break.
+  final int consistencyScore;
+
   const StreakResult({
     required this.currentStreak,
     required this.bestStreak,
     required this.completionsThisPeriod,
     required this.completedToday,
+    this.consistencyScore = 0,
   });
 
   static const empty = StreakResult(
@@ -28,11 +39,6 @@ class StreakResult {
     completionsThisPeriod: 0,
     completedToday: false,
   );
-
-  /// A simple streak "score": current streak weighted a bit higher
-  /// than the historical best, so consistent recent behavior matters
-  /// more than a long-past run. Tune freely later.
-  int get score => currentStreak * 10 + bestStreak;
 
   /// Milestone thresholds reached so far, based on [bestStreak].
   List<int> get milestonesReached =>
@@ -73,9 +79,19 @@ class StreakCalculator {
     if (logs.isEmpty) return StreakResult.empty;
     final effectiveNow = now ?? DateTime.now();
 
-    return habit.frequency == HabitFrequency.daily
+    final base = habit.frequency == HabitFrequency.daily
         ? _computeDaily(habit, logs, effectiveNow)
         : _computeWeekly(habit, logs, effectiveNow);
+    final score = habit.frequency == HabitFrequency.daily
+        ? _dailyConsistencyScore(habit, logs, effectiveNow)
+        : _weeklyConsistencyScore(habit, logs, effectiveNow);
+    return StreakResult(
+      currentStreak: base.currentStreak,
+      bestStreak: base.bestStreak,
+      completionsThisPeriod: base.completionsThisPeriod,
+      completedToday: base.completedToday,
+      consistencyScore: score,
+    );
   }
 
   /// Whether a single log entry counts as "done" for [habit] — public
@@ -91,7 +107,12 @@ class StreakCalculator {
       case HabitType.count:
       case HabitType.duration:
         final target = habit.dailyTarget ?? 1;
-        return (log.amount ?? 0) >= target;
+        final actual = log.amount ?? 0;
+        // An "at most" habit (e.g. screen time) is done by staying at
+        // or under its target instead of reaching it.
+        return habit.targetMode == TargetMode.atMost
+            ? actual <= target
+            : actual >= target;
     }
   }
 
@@ -113,12 +134,15 @@ class StreakCalculator {
     final tolerance = habit.tolerancePerMonth;
     final today = HabitLog.dayOnly(now);
     final completedToday = doneDays.contains(today);
-    // Never walk further back than the habit's own creation date. A
-    // sparsely-logged habit with a generous tolerance would otherwise
-    // "refill" its tolerance credit every calendar month (the per-month
-    // counter resets on each new key) and walk backward indefinitely
-    // even with almost nothing logged.
-    final habitStart = HabitLog.dayOnly(habit.createdAt);
+    // Never walk further back than the earliest day that's actually
+    // logged done. A sparsely-logged habit with a generous tolerance
+    // would otherwise "refill" its tolerance credit every calendar
+    // month (the per-month counter resets on each new key) and walk
+    // backward indefinitely even with almost nothing logged. We used
+    // to bound this by the habit's creation date instead, but that
+    // wrongly ignored days you'd backfilled from before you added the
+    // habit to the app — the actual data is the real boundary.
+    final earliestDone = doneDays.reduce((a, b) => a.isBefore(b) ? a : b);
 
     // Current streak: walk backwards from today (or yesterday, if
     // today isn't done yet). A missed day doesn't stop the walk as
@@ -128,7 +152,7 @@ class StreakCalculator {
     final usedBackward = <String, int>{};
     var cursor = completedToday ? today : today.subtract(const Duration(days: 1));
     var current = 0;
-    while (!cursor.isBefore(habitStart)) {
+    while (!cursor.isBefore(earliestDone)) {
       if (doneDays.contains(cursor)) {
         current++;
       } else {
@@ -199,10 +223,12 @@ class StreakCalculator {
     final thisWeekStart = _weekStart(today);
     final completionsThisWeek = byWeek[thisWeekStart] ?? 0;
     final tolerance = habit.tolerancePerMonth;
-    // Same reasoning as the daily case: bound the walk by the habit's
-    // creation date so a generous tolerance can't send it wandering back
-    // indefinitely through weeks with no data.
-    final habitWeekStart = _weekStart(HabitLog.dayOnly(habit.createdAt));
+    // Same reasoning as the daily case: bound the walk by the earliest
+    // week that actually has data, not the habit's creation date, so a
+    // generous tolerance can't send it wandering back indefinitely
+    // through weeks with no data — while still honoring weeks you
+    // backfilled from before the habit existed in the app.
+    final earliestWeekStart = byWeek.keys.reduce((a, b) => a.isBefore(b) ? a : b);
 
     // Current streak: walk backwards week by week from this week (or
     // last week, if this week hasn't hit target yet). A week that falls
@@ -215,7 +241,7 @@ class StreakCalculator {
         ? thisWeekStart
         : thisWeekStart.subtract(const Duration(days: 7));
     var current = 0;
-    while (!cursor.isBefore(habitWeekStart)) {
+    while (!cursor.isBefore(earliestWeekStart)) {
       final shortfall = target - (byWeek[cursor] ?? 0);
       if (shortfall <= 0) {
         current++;
@@ -272,4 +298,190 @@ class StreakCalculator {
 
   static bool _isThisWeek(DateTime day, DateTime now) =>
       _weekStart(day) == _weekStart(HabitLog.dayOnly(now));
+
+  // ==== Consistency score ==================================================
+  //
+  // A 0-100 score built from two things, on purpose kept separate from
+  // the streak-length math above:
+  //
+  // - "Base": how close to target you've been *lately* (a trailing
+  //   window — 2 weeks for a daily habit, 3 weeks for a weekly one).
+  //   This is what lets a brand-new habit already sit at a fair score
+  //   within a couple of weeks, rather than waiting on history it
+  //   can't have yet. Hitting your target exactly settles at 90;
+  //   overshooting nudges it up toward 95; falling short (even within
+  //   your tolerance) eases it down smoothly — no cliff at any point.
+  // - "Bonus": up to +10 more for having kept that up for a long time
+  //   — modeled as a slowly-charging exponential average (~75-day
+  //   half-life) that starts at zero for every habit and can only be
+  //   earned by racking up real elapsed time at or above target. This
+  //   is deliberately the *only* way to close in on 100: it doesn't
+  //   move any faster just because you overachieved today, so doing a
+  //   habit to the extreme for a few days can't shortcut what only
+  //   months of steady consistency actually earns.
+  //
+  // Both pieces use the same 0-100-ish curve ([_curve]) so "on target"
+  // always means the same thing in either one.
+
+  static const _baseWindowDays = 14;
+  static const _baseWindowWeeks = 3;
+  static const _bonusHalfLifeDays = 75.0;
+  static const _bonusMaxLookbackDays = 500;
+  static const _bonusMaxPoints = 10.0;
+
+  static DateTime _laterOf(DateTime a, DateTime b) => a.isAfter(b) ? a : b;
+
+  /// Maps a single "actual vs. target" ratio to a 0-100-ish value.
+  /// Exactly on target (r=1) is 90. Short of target eases down with a
+  /// gentle (concave) curve — a small shortfall barely costs anything,
+  /// a big one costs more — reaching 0 only at r=0. Beyond target,
+  /// it creeps up toward 95 but never quite gets there; the rest of
+  /// the way to 100 is [_bonusMaxPoints]'s job, not this curve's.
+  static double _curve(double r) {
+    if (r <= 0) return 0;
+    if (r >= 1) return 90 + 5 * (1 - 1 / r);
+    return 90 * math.pow(r, 0.6).toDouble();
+  }
+
+  /// A ratio of "how much was actually done" against [habit]'s daily
+  /// target for one day's (optional) log — 1.0 means exactly on
+  /// target, >1 overachieving, 0 means nothing logged that day at all
+  /// (no credit for a day you didn't check in on, same as everywhere
+  /// else in this calculator). Capped at 3x so one wild outlier day
+  /// can't distort the rolling averages below.
+  static double _dailyRatio(Habit habit, HabitLog? log) {
+    if (log == null) return 0;
+    if (habit.type == HabitType.boolean) return 1;
+    final target = habit.dailyTarget ?? 1;
+    final actual = log.amount ?? 0;
+    if (habit.targetMode == TargetMode.atMost) {
+      if (actual <= 0) return 3; // used none of it -- can't do better
+      return (target / actual).clamp(0.0, 3.0);
+    }
+    if (target <= 0) return 1;
+    return (actual / target).clamp(0.0, 3.0);
+  }
+
+  /// The slow-building [_bonusMaxPoints]-point bonus: an exponential
+  /// average of [ratios] (oldest first), each capped at 1 before being
+  /// folded in — overachieving a day doesn't earn bonus any faster
+  /// than just hitting target does, since this bonus is about *time*
+  /// kept up, not magnitude. Starts at 0 regardless of how good the
+  /// very first entries were, so it only fills in as real time passes.
+  static double _bonusFraction(List<double> ratiosOldestFirst, double halfLifeUnits) {
+    if (ratiosOldestFirst.isEmpty) return 0;
+    final alpha = 1 - math.pow(0.5, 1 / halfLifeUnits).toDouble();
+    var ema = 0.0;
+    for (final r in ratiosOldestFirst) {
+      final input = r.clamp(0.0, 1.0);
+      ema = alpha * input + (1 - alpha) * ema;
+    }
+    return ema;
+  }
+
+  static int _dailyConsistencyScore(
+    Habit habit,
+    List<HabitLog> logs,
+    DateTime now,
+  ) {
+    final logByDay = <DateTime, HabitLog>{};
+    for (final log in logs) {
+      logByDay[HabitLog.dayOnly(log.date)] = log;
+    }
+    final today = HabitLog.dayOnly(now);
+
+    // Always average over the full fixed-length window, even for a
+    // brand-new habit — a day with no log (whether that's because it's
+    // before the habit was created, before you started backfilling, or
+    // you just plain missed it) contributes a ratio of 0 via
+    // `_dailyRatio`'s null case. That's what makes a single great day-one
+    // entry score low instead of jumping straight to 90: it's one good
+    // day averaged against ~13 "empty" ones. We used to clamp this
+    // window to the habit's creation date, which shrank the averaging
+    // denominator for a young habit and let day one hit 90 immediately —
+    // exactly backwards from "climbs to 90 after a couple of weeks".
+    final baseStart = today.subtract(const Duration(days: _baseWindowDays - 1));
+    var baseSum = 0.0;
+    var baseCount = 0;
+    for (var d = baseStart; !d.isAfter(today); d = d.add(const Duration(days: 1))) {
+      baseSum += _dailyRatio(habit, logByDay[d]);
+      baseCount++;
+    }
+    final base = _curve(baseCount == 0 ? 0 : baseSum / baseCount);
+
+    // The bonus only looks as far back as real logged data goes (not
+    // the habit's creation date) — so a long run you backfilled from
+    // before you added the habit to the app still earns its bonus, the
+    // same as if you'd been logging it here the whole time.
+    final bonusStart = logByDay.isEmpty
+        ? today
+        : _laterOf(
+            logByDay.keys.reduce((a, b) => a.isBefore(b) ? a : b),
+            today.subtract(const Duration(days: _bonusMaxLookbackDays - 1)),
+          );
+    final ratios = <double>[];
+    for (var d = bonusStart; !d.isAfter(today); d = d.add(const Duration(days: 1))) {
+      ratios.add(_dailyRatio(habit, logByDay[d]));
+    }
+    final bonus = _bonusMaxPoints * _bonusFraction(ratios, _bonusHalfLifeDays);
+
+    return (base + bonus).clamp(0, 100).round();
+  }
+
+  static int _weeklyConsistencyScore(
+    Habit habit,
+    List<HabitLog> logs,
+    DateTime now,
+  ) {
+    final target = habit.targetPerWeek.clamp(1, 7);
+    final doneDays = <DateTime>{};
+    for (final log in logs) {
+      if (_isLogComplete(habit, log)) {
+        doneDays.add(HabitLog.dayOnly(log.date));
+      }
+    }
+    final byWeek = <DateTime, int>{};
+    for (final day in doneDays) {
+      final ws = _weekStart(day);
+      byWeek[ws] = (byWeek[ws] ?? 0) + 1;
+    }
+    double weekRatio(DateTime weekStart) =>
+        ((byWeek[weekStart] ?? 0) / target).clamp(0.0, 3.0);
+
+    final thisWeekStart = _weekStart(HabitLog.dayOnly(now));
+
+    // Same fix as the daily version: always average the full fixed
+    // window of weeks, so a brand-new habit's first on-target week
+    // isn't averaged against nothing — it's averaged against the
+    // ~2 mostly-empty (ratio 0) weeks before it, the same way a real
+    // missed week would be.
+    final baseStart =
+        thisWeekStart.subtract(Duration(days: 7 * (_baseWindowWeeks - 1)));
+    var baseSum = 0.0;
+    var baseCount = 0;
+    for (var w = baseStart; !w.isAfter(thisWeekStart); w = w.add(const Duration(days: 7))) {
+      baseSum += weekRatio(w);
+      baseCount++;
+    }
+    final base = _curve(baseCount == 0 ? 0 : baseSum / baseCount);
+
+    final bonusHalfLifeWeeks = _bonusHalfLifeDays / 7;
+    final bonusMaxLookbackWeeks = _bonusMaxLookbackDays ~/ 7;
+    // As with the daily bonus, bound by the earliest week with real
+    // data rather than the habit's creation date, so backfilled
+    // history earns its bonus too.
+    final bonusStart = byWeek.isEmpty
+        ? thisWeekStart
+        : _laterOf(
+            byWeek.keys.reduce((a, b) => a.isBefore(b) ? a : b),
+            thisWeekStart.subtract(Duration(days: 7 * (bonusMaxLookbackWeeks - 1))),
+          );
+    final ratios = <double>[];
+    for (var w = bonusStart; !w.isAfter(thisWeekStart); w = w.add(const Duration(days: 7))) {
+      ratios.add(weekRatio(w));
+    }
+    final bonus = _bonusMaxPoints * _bonusFraction(ratios, bonusHalfLifeWeeks);
+
+    return (base + bonus).clamp(0, 100).round();
+  }
 }

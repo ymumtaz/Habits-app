@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+
 /// Shows a small "are you sure?" dialog before a destructive action.
 /// Returns true if the user confirmed, false/null if they backed out
 /// (tapped Cancel, the scrim, or the back button) — always treat a
@@ -17,7 +19,7 @@ Future<bool> confirmDelete(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
+          child: Text(context.l10n.cancel),
         ),
         FilledButton.tonal(
           onPressed: () => Navigator.of(context).pop(true),
@@ -25,7 +27,7 @@ Future<bool> confirmDelete(
             backgroundColor: Theme.of(context).colorScheme.errorContainer,
             foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
           ),
-          child: const Text('Delete'),
+          child: Text(context.l10n.delete),
         ),
       ],
     ),

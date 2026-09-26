@@ -1,11 +1,15 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 import '../models/project.dart';
 import '../models/project_category.dart';
+import '../models/session_tag.dart';
 import '../models/task.dart';
 import '../models/time_entry.dart';
+import '../services/notification_service.dart';
+import '../utils/duration_format.dart';
+import '../utils/locale_prefs.dart';
 import '../utils/week_config.dart';
 import 'project_repository.dart';
 
@@ -57,6 +61,8 @@ class ProjectProvider extends ChangeNotifier {
   Map<int, List<TimeEntry>> _entriesByProject = {};
   Map<int, List<Task>> _tasksByProject = {};
   List<Task> _standaloneTasks = [];
+  List<SessionTag> _tags = [];
+  Map<int, List<int>> _entryTagIds = {};
   TimeEntry? _activeEntry;
   bool _loading = true;
   Timer? _ticker;
@@ -64,6 +70,7 @@ class ProjectProvider extends ChangeNotifier {
   List<Project> get projects => List.unmodifiable(_projects);
   List<ProjectCategory> get categories => List.unmodifiable(_categories);
   List<Task> get standaloneTasks => List.unmodifiable(_standaloneTasks);
+  List<SessionTag> get tags => List.unmodifiable(_tags);
   bool get isLoading => _loading;
   TimeEntry? get activeEntry => _activeEntry;
 
@@ -155,6 +162,15 @@ class ProjectProvider extends ChangeNotifier {
     return null;
   }
 
+  /// The tags currently on session [entryId] (only those that still
+  /// exist — one may have been deleted since), in the app's normal
+  /// tag order.
+  List<SessionTag> tagsForEntry(int entryId) {
+    final ids = _entryTagIds[entryId];
+    if (ids == null || ids.isEmpty) return const [];
+    return [for (final t in _tags) if (ids.contains(t.id)) t];
+  }
+
   /// The project this one nests under, if any and if it's still an
   /// active (non-archived) project.
   Project? parentOf(Project project) {
@@ -194,13 +210,30 @@ class ProjectProvider extends ChangeNotifier {
     return [for (final p in _projects) if (!excluded.contains(p.id)) p];
   }
 
+  /// [project] plus every descendant (children, grandchildren, ...) —
+  /// a sub-project is, at the end of the day, just part of its
+  /// parent's own work, so a parent's totals below fold all of this
+  /// in rather than showing only what was logged directly on it.
+  List<Project> _projectAndDescendants(Project project) {
+    final result = <Project>[project];
+    for (final child in childrenOf(project)) {
+      result.addAll(_projectAndDescendants(child));
+    }
+    return result;
+  }
+
   /// Total tracked time for a project, including the live elapsed
-  /// time of its currently-running entry (if any).
+  /// time of its currently-running entry (if any), and rolled up to
+  /// include every sub-project's time as well (see
+  /// [_projectAndDescendants]) — a child's own [totalDurationFor] is
+  /// still just its own tree, so this is safe to show side-by-side on
+  /// a parent/child list without double-counting anything on screen.
   Duration totalDurationFor(Project project) {
-    final entries = _entriesByProject[project.id] ?? const [];
     var total = Duration.zero;
-    for (final e in entries) {
-      total += e.duration;
+    for (final p in _projectAndDescendants(project)) {
+      for (final e in _entriesByProject[p.id] ?? const []) {
+        total += e.duration;
+      }
     }
     return total;
   }
@@ -216,6 +249,8 @@ class ProjectProvider extends ChangeNotifier {
       _repo.fetchAllProjectTasks(),
       _repo.fetchStandaloneTasks(),
       _repo.fetchCategories(),
+      _repo.fetchTags(),
+      _repo.fetchAllEntryTags(),
     ]);
     _projects = results[0] as List<Project>;
     _entriesByProject = results[1] as Map<int, List<TimeEntry>>;
@@ -223,10 +258,13 @@ class ProjectProvider extends ChangeNotifier {
     _tasksByProject = results[3] as Map<int, List<Task>>;
     _standaloneTasks = results[4] as List<Task>;
     _categories = results[5] as List<ProjectCategory>;
+    _tags = results[6] as List<SessionTag>;
+    _entryTagIds = results[7] as Map<int, List<int>>;
 
     _syncTicker();
     _loading = false;
     notifyListeners();
+    unawaited(_updateSessionNotification());
   }
 
   Future<void> addProject(Project project) async {
@@ -243,6 +281,18 @@ class ProjectProvider extends ChangeNotifier {
   /// chip) without needing a full [Project.copyWith] at the call site.
   Future<void> setStatus(Project project, ProjectStatus status) async {
     await updateProject(project.copyWith(status: status));
+  }
+
+  /// Reparents [project] under [newParent] (or clears it back to
+  /// top-level, passing null) — the same change available from the
+  /// add/edit screen's "Parent project" field, exposed here for the
+  /// Projects list's "Move to parent" shortcut so re-nesting an
+  /// existing project doesn't require opening its edit screen.
+  Future<void> setParent(Project project, Project? newParent) async {
+    await updateProject(project.copyWith(
+      parentId: newParent?.id,
+      clearParentId: newParent == null,
+    ));
   }
 
   Future<void> archiveProject(Project project) async {
@@ -273,15 +323,19 @@ class ProjectProvider extends ChangeNotifier {
 
   // ---- Project categories (user-managed types) --------------------------
 
-  Future<void> addCategory(String name) async {
+  Future<void> addCategory(String name, IconData icon) async {
     if (name.trim().isEmpty) return;
-    await _repo.createCategory(name.trim());
+    await _repo.createCategory(name.trim(), icon);
     await _refreshCategories();
   }
 
-  Future<void> renameCategory(ProjectCategory category, String newName) async {
-    if (category.id == null || newName.trim().isEmpty) return;
-    await _repo.renameCategory(category.id!, newName.trim());
+  Future<void> updateCategory(
+    ProjectCategory category, {
+    required String name,
+    required IconData icon,
+  }) async {
+    if (category.id == null || name.trim().isEmpty) return;
+    await _repo.updateCategory(category.id!, name: name.trim(), icon: icon);
     await _refreshCategories();
   }
 
@@ -298,11 +352,42 @@ class ProjectProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- Session tags (user-managed session journal labels) -------------
+
+  Future<void> addTag(String name) async {
+    if (name.trim().isEmpty) return;
+    await _repo.createTag(name.trim());
+    await _refreshTags();
+  }
+
+  Future<void> renameTag(SessionTag tag, String newName) async {
+    if (tag.id == null || newName.trim().isEmpty) return;
+    await _repo.renameTag(tag.id!, newName.trim());
+    await _refreshTags();
+  }
+
+  Future<void> deleteTag(SessionTag tag) async {
+    if (tag.id == null) return;
+    await _repo.deleteTag(tag.id!);
+    // Deleting a tag clears it off any session that had it, so the
+    // per-entry tag map needs a refresh too, not just the tag list.
+    await _refreshTags();
+    await _refreshEntriesAndActive();
+  }
+
+  Future<void> _refreshTags() async {
+    _tags = await _repo.fetchTags();
+    notifyListeners();
+  }
+
   /// Begins a brand-new running session for [project]. Ends whatever
-  /// other session (running or paused) was open, if any.
-  Future<void> beginSession(Project project) async {
+  /// other session (running or paused) was open, if any. [targetMinutes]
+  /// starts it as a countdown (e.g. 25 for a Pomodoro-style session);
+  /// omit it for an open-ended count-up timer.
+  Future<void> beginSession(Project project, {int? targetMinutes}) async {
     if (project.id == null) return;
-    await _repo.beginSession(project.id!);
+    await NotificationService.instance.requestPermission();
+    await _repo.beginSession(project.id!, targetMinutes: targetMinutes);
     await _refreshEntriesAndActive();
   }
 
@@ -334,10 +419,26 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   /// Ends & records the currently-open session (running or paused).
-  Future<void> endActiveSession() async {
+  /// Pass [duration] to override the recorded length (e.g. the timer
+  /// was accidentally left running and the real working time was much
+  /// shorter) — see [ProjectRepository.endSession] for exactly how
+  /// that's applied. [note] and [tagIds] become the session's journal
+  /// entry: what happened, and what it was about.
+  Future<void> endActiveSession({
+    Duration? duration,
+    String? title,
+    String? note,
+    List<int> tagIds = const [],
+  }) async {
     final active = _activeEntry;
     if (active?.id == null) return;
-    await _repo.endSession(active!.id!);
+    await _repo.endSession(
+      active!.id!,
+      duration: duration,
+      title: title,
+      note: note,
+      tagIds: tagIds,
+    );
     await _refreshEntriesAndActive();
   }
 
@@ -347,14 +448,18 @@ class ProjectProvider extends ChangeNotifier {
     Project project, {
     required DateTime startedAt,
     required Duration duration,
+    String? title,
     String? note,
+    List<int> tagIds = const [],
   }) async {
     if (project.id == null) return;
     await _repo.addManualEntry(
       projectId: project.id!,
       startedAt: startedAt,
       duration: duration,
+      title: title,
       note: note,
+      tagIds: tagIds,
     );
     await _refreshEntriesAndActive();
   }
@@ -366,9 +471,11 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   /// Re-inserts an entry that was just deleted — pairs with a delete
-  /// confirmation's "Undo" snackbar action.
-  Future<void> restoreEntry(TimeEntry entry) async {
-    await _repo.restoreEntry(entry);
+  /// confirmation's "Undo" snackbar action. Pass the tag ids it had
+  /// (e.g. from [tagsForEntry], captured before the delete) to restore
+  /// those too, since deleting the entry also drops its tag links.
+  Future<void> restoreEntry(TimeEntry entry, {List<int> tagIds = const []}) async {
+    await _repo.restoreEntry(entry, tagIds: tagIds);
     await _refreshEntriesAndActive();
   }
 
@@ -395,12 +502,13 @@ class ProjectProvider extends ChangeNotifier {
     await _repo.reorderProjects(ids);
   }
 
-  /// Updates an existing entry's start time, duration, and/or note —
-  /// e.g. fixing a mistyped manual entry or a timer session that ran
-  /// longer than intended.
-  Future<void> updateEntry(TimeEntry entry) async {
+  /// Updates an existing entry's start time, duration, note, and/or
+  /// tags — e.g. fixing a mistyped manual entry or a timer session
+  /// that ran longer than intended. Pass [tagIds] to also replace its
+  /// tags; omit it to leave them as they were.
+  Future<void> updateEntry(TimeEntry entry, {List<int>? tagIds}) async {
     if (entry.id == null) return;
-    await _repo.updateEntry(entry);
+    await _repo.updateEntry(entry, tagIds: tagIds);
     await _refreshEntriesAndActive();
   }
 
@@ -477,7 +585,7 @@ class ProjectProvider extends ChangeNotifier {
   Duration weeklyDurationFor(Project project) {
     final start = _weekStart(DateTime.now());
     final end = start.add(const Duration(days: 7));
-    return _durationFor(project, start, end);
+    return _durationForInclusive(project, start, end);
   }
 
   Duration _durationFor(Project project, DateTime start, DateTime endExclusive) {
@@ -491,20 +599,45 @@ class ProjectProvider extends ChangeNotifier {
     return total;
   }
 
-  /// Per-project tracked time within [start, endExclusive) — the
-  /// building block for the cross-project time dashboard.
+  /// Same as [_durationFor], but rolled up over [project] and every
+  /// descendant — the per-project counterpart to [totalDurationFor]'s
+  /// own rollup. Only ever call this per-project (as every method
+  /// below does): summing it across a whole family would double-count
+  /// a child's time once under itself and again under its parent. For
+  /// an app-wide total that stays double-count-safe, use
+  /// [totalDurationForRange] / [dailyTotalsForMonth] instead, which
+  /// deliberately sum the *non-rolled-up* [_durationFor].
+  Duration _durationForInclusive(
+    Project project,
+    DateTime start,
+    DateTime endExclusive,
+  ) {
+    var total = Duration.zero;
+    for (final p in _projectAndDescendants(project)) {
+      total += _durationFor(p, start, endExclusive);
+    }
+    return total;
+  }
+
+  /// Per-project tracked time within [start, endExclusive), each
+  /// figure rolled up to include that project's own sub-projects (see
+  /// [_durationForInclusive]) — do not sum the values of this map for
+  /// an app-wide total, since a child's time is counted again under
+  /// every ancestor; use [totalDurationForRange] for that instead.
   Map<Project, Duration> durationsForRange(
     DateTime start,
     DateTime endExclusive,
   ) {
     return {
       for (final project in _projects)
-        project: _durationFor(project, start, endExclusive),
+        project: _durationForInclusive(project, start, endExclusive),
     };
   }
 
   /// Total tracked time across every project within [start,
-  /// endExclusive).
+  /// endExclusive) — a plain per-project sum (not rolled up by
+  /// family), so nesting projects under a parent never changes this
+  /// app-wide figure.
   Duration totalDurationForRange(DateTime start, DateTime endExclusive) {
     var total = Duration.zero;
     for (final project in _projects) {
@@ -513,15 +646,160 @@ class ProjectProvider extends ChangeNotifier {
     return total;
   }
 
+  /// Tracked time for [project] on each of the last 7 days (today
+  /// inclusive, oldest first) — a rolling window, not the calendar
+  /// week, matching the "last 7 days" style used elsewhere. Powers the
+  /// small weekly bar strip on a project's own detail page.
+  List<Duration> last7DaysDurationsFor(Project project) {
+    final today = _dateOnly(DateTime.now());
+    return [
+      for (var i = 6; i >= 0; i--)
+        _durationForInclusive(
+          project,
+          today.subtract(Duration(days: i)),
+          today.subtract(Duration(days: i - 1)),
+        ),
+    ];
+  }
+
+  /// This calendar month's tracked time for [project] so far, mirroring
+  /// [weeklyDurationFor].
+  Duration monthlyDurationFor(Project project) {
+    final start = monthStart(DateTime.now());
+    final end = DateTime.now().add(const Duration(days: 1));
+    return _durationForInclusive(project, start, end);
+  }
+
+  /// Tracked time on each day of [month] (any date within the target
+  /// month) for [project] — the building block for a Google-Fit-style
+  /// monthly bubble chart. Keyed by date-only day.
+  Map<DateTime, Duration> dailyDurationsForMonth(Project project, DateTime month) {
+    final start = DateTime(month.year, month.month, 1);
+    final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+    return {
+      for (var d = 0; d < daysInMonth; d++)
+        start.add(Duration(days: d)): _durationForInclusive(
+          project,
+          start.add(Duration(days: d)),
+          start.add(Duration(days: d + 1)),
+        ),
+    };
+  }
+
+  /// Tracked time for [project] on each day of [start, endExclusive) —
+  /// a generalization of [dailyDurationsForMonth] that can span past a
+  /// single calendar month's own boundaries. Used to fetch data for a
+  /// monthly bubble chart's full calendar-week grid (which pads out to
+  /// whole Monday–Sunday, or configured first-day-of-week, weeks), so
+  /// its "Weekly totals" list can total a real full week instead of
+  /// just whichever few of those days happen to land in this month.
+  Map<DateTime, Duration> dailyDurationsForRange(
+    Project project,
+    DateTime start,
+    DateTime endExclusive,
+  ) {
+    final days = endExclusive.difference(start).inDays;
+    return {
+      for (var d = 0; d < days; d++)
+        start.add(Duration(days: d)): _durationForInclusive(
+          project,
+          start.add(Duration(days: d)),
+          start.add(Duration(days: d + 1)),
+        ),
+    };
+  }
+
+  /// Per-project tracked time on each of the last 7 days (today
+  /// inclusive, oldest first) — the building block for the stacked
+  /// weekly chart in Insights > Projects.
+  Map<Project, List<Duration>> last7DaysDurationsByProject() {
+    return {for (final project in _projects) project: last7DaysDurationsFor(project)};
+  }
+
+  /// Total tracked time across every project on each day of [month] —
+  /// the aggregate counterpart to [dailyDurationsForMonth], used by the
+  /// Insights > Projects monthly bubble chart.
+  Map<DateTime, Duration> dailyTotalsForMonth(DateTime month) {
+    final start = DateTime(month.year, month.month, 1);
+    final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+    return {
+      for (var d = 0; d < daysInMonth; d++)
+        start.add(Duration(days: d)): totalDurationForRange(
+          start.add(Duration(days: d)),
+          start.add(Duration(days: d + 1)),
+        ),
+    };
+  }
+
   Future<void> _refreshEntriesAndActive() async {
     final results = await Future.wait([
       _repo.fetchAllEntries(),
       _repo.fetchActiveEntry(),
+      _repo.fetchAllEntryTags(),
     ]);
     _entriesByProject = results[0] as Map<int, List<TimeEntry>>;
     _activeEntry = results[1] as TimeEntry?;
+    _entryTagIds = results[2] as Map<int, List<int>>;
     _syncTicker();
     notifyListeners();
+    unawaited(_updateSessionNotification());
+  }
+
+  /// Shows/updates/cancels the ongoing "session in progress" system
+  /// notification to match [_activeEntry] — a live minutes:seconds
+  /// clock (driven by Android's own notification chronometer, not by
+  /// this app reposting every second) while running, a frozen elapsed
+  /// time while paused, and cancelled once nothing is active. Called
+  /// after every mutation that can change the active session, so it's
+  /// naturally idempotent: reposting the same state is harmless.
+  /// Best-effort — a notification-plugin hiccup should never take down
+  /// the app itself, so failures are swallowed.
+  Future<void> _updateSessionNotification() async {
+    try {
+      final active = _activeEntry;
+      if (active == null) {
+        await NotificationService.instance.cancelSessionNotification();
+        return;
+      }
+      Project? project;
+      for (final p in _projects) {
+        if (p.id == active.projectId) {
+          project = p;
+          break;
+        }
+      }
+      final projectName = project?.name ?? '';
+      await NotificationService.instance.init();
+      final t = await currentAppLocalizations();
+      if (active.isPaused) {
+        final label = projectName.isEmpty
+            ? formatDurationClock(active.duration)
+            : '$projectName · ${formatDurationClock(active.duration)}';
+        await NotificationService.instance.showSessionPaused(
+          title: t.sessionPausedNotifTitle,
+          body: label,
+          channelName: t.sessionInProgressNotifTitle,
+          channelDescription: t.sessionProgressChannelDescription,
+        );
+      } else {
+        // The chronometer should read 00:00 at start time plus any
+        // time already spent paused across earlier pause/resume
+        // cycles — matches [TimeEntry.duration]'s own math for a
+        // currently-running (not paused) entry.
+        final baseEpochMillis = active.startedAt
+            .add(Duration(seconds: active.pausedSeconds))
+            .millisecondsSinceEpoch;
+        await NotificationService.instance.showSessionRunning(
+          title: t.sessionInProgressNotifTitle,
+          body: projectName,
+          baseEpochMillis: baseEpochMillis,
+          channelName: t.sessionInProgressNotifTitle,
+          channelDescription: t.sessionProgressChannelDescription,
+        );
+      }
+    } catch (_) {
+      // Best-effort, as above.
+    }
   }
 
   /// Starts/stops a once-a-second tick so the UI's live "elapsed"

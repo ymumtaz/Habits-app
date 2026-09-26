@@ -1,7 +1,9 @@
+import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../models/project.dart';
 import '../models/project_category.dart';
+import '../models/session_tag.dart';
 import '../models/task.dart';
 import '../models/time_entry.dart';
 import 'database.dart';
@@ -136,7 +138,7 @@ class ProjectRepository {
   /// Ends whatever other session (running or paused) is currently
   /// active anywhere, then begins a brand-new running session for
   /// [projectId]. Only one project's session is ever open at a time.
-  Future<void> beginSession(int projectId) async {
+  Future<void> beginSession(int projectId, {int? targetMinutes}) async {
     final db = await _db;
     final now = DateTime.now();
     await db.transaction((txn) async {
@@ -152,6 +154,7 @@ class ProjectRepository {
         'note': null,
         'paused_at': null,
         'paused_seconds': 0,
+        'target_minutes': targetMinutes,
       });
     });
   }
@@ -209,55 +212,153 @@ class ProjectRepository {
     required int projectId,
     required DateTime startedAt,
     required Duration duration,
+    String? title,
     String? note,
+    List<int> tagIds = const [],
   }) async {
     final db = await _db;
-    await db.insert('time_entries', {
-      'project_id': projectId,
-      'started_at': startedAt.toIso8601String(),
-      'ended_at': startedAt.add(duration).toIso8601String(),
-      'note': note,
+    await db.transaction((txn) async {
+      final id = await txn.insert('time_entries', {
+        'project_id': projectId,
+        'started_at': startedAt.toIso8601String(),
+        'ended_at': startedAt.add(duration).toIso8601String(),
+        'title': title,
+        'note': note,
+      });
+      await _setEntryTags(txn, id, tagIds);
     });
   }
 
   /// Updates an existing time entry's start time, end time, and/or
   /// note — used to fix a manually-logged or timer-recorded session
-  /// after the fact.
-  Future<void> updateEntry(TimeEntry entry) async {
+  /// after the fact. Pass [tagIds] to also replace its tags; omit it
+  /// to leave the entry's current tags untouched.
+  Future<void> updateEntry(TimeEntry entry, {List<int>? tagIds}) async {
     assert(entry.id != null, 'Cannot update a time entry without an id');
     final db = await _db;
-    await db.update(
-      'time_entries',
-      entry.toMap(),
-      where: 'id = ?',
-      whereArgs: [entry.id],
-    );
+    await db.transaction((txn) async {
+      await txn.update(
+        'time_entries',
+        entry.toMap(),
+        where: 'id = ?',
+        whereArgs: [entry.id],
+      );
+      if (tagIds != null) {
+        await _setEntryTags(txn, entry.id!, tagIds);
+      }
+    });
   }
 
   /// Re-inserts a previously-deleted time entry exactly as it was
-  /// (same start/end time and note) — used to power an "Undo" after a
-  /// session deletion.
-  Future<void> restoreEntry(TimeEntry entry) async {
+  /// (same start/end time and note), with [tagIds] restored alongside
+  /// it — used to power an "Undo" after a session deletion.
+  Future<void> restoreEntry(TimeEntry entry, {List<int> tagIds = const []}) async {
     final db = await _db;
-    await db.insert('time_entries', entry.toMap()..remove('id'));
+    await db.transaction((txn) async {
+      final id = await txn.insert('time_entries', entry.toMap()..remove('id'));
+      await _setEntryTags(txn, id, tagIds);
+    });
   }
 
   /// Ends & records [entryId] — whether it was running or paused, its
-  /// final [TimeEntry.duration] is fixed as of now and it stops being
-  /// the active session.
-  Future<void> endSession(int entryId) async {
+  /// final duration is fixed and it stops being the active session.
+  ///
+  /// By default the final duration is just "however long it's been
+  /// since it started" (minus any time already spent paused), same as
+  /// before. Pass [duration] to override that with an edited value
+  /// instead — e.g. the session was accidentally left running and the
+  /// real working time was much shorter — by folding the difference
+  /// into `paused_seconds` rather than rewriting `started_at`, so the
+  /// entry's true start time is preserved. [note] and [tagIds] are
+  /// always applied (pass nothing/empty to leave them blank).
+  Future<void> endSession(
+    int entryId, {
+    Duration? duration,
+    String? title,
+    String? note,
+    List<int> tagIds = const [],
+  }) async {
     final db = await _db;
-    await db.update(
-      'time_entries',
-      {'ended_at': DateTime.now().toIso8601String()},
-      where: 'id = ?',
-      whereArgs: [entryId],
-    );
+    final now = DateTime.now();
+    await db.transaction((txn) async {
+      final updates = <String, Object?>{
+        'ended_at': now.toIso8601String(),
+        'title': title,
+        'note': note,
+        'paused_at': null,
+      };
+      if (duration != null) {
+        final rows = await txn.query('time_entries',
+            columns: ['started_at'], where: 'id = ?', whereArgs: [entryId], limit: 1);
+        if (rows.isNotEmpty) {
+          final startedAt = DateTime.parse(rows.first['started_at'] as String);
+          final elapsedSeconds = now.difference(startedAt).inSeconds;
+          updates['paused_seconds'] =
+              (elapsedSeconds - duration.inSeconds).clamp(0, elapsedSeconds);
+        }
+      }
+      await txn.update('time_entries', updates, where: 'id = ?', whereArgs: [entryId]);
+      await _setEntryTags(txn, entryId, tagIds);
+    });
   }
 
   Future<void> deleteEntry(int entryId) async {
     final db = await _db;
     await db.delete('time_entries', where: 'id = ?', whereArgs: [entryId]);
+  }
+
+  /// Every tag currently on every session, grouped by time entry id —
+  /// the same one-query-instead-of-N pattern [fetchAllEntries] uses.
+  Future<Map<int, List<int>>> fetchAllEntryTags() async {
+    final db = await _db;
+    final rows = await db.query('time_entry_tags');
+    final grouped = <int, List<int>>{};
+    for (final row in rows) {
+      grouped
+          .putIfAbsent(row['time_entry_id'] as int, () => [])
+          .add(row['tag_id'] as int);
+    }
+    return grouped;
+  }
+
+  /// Replaces every tag on [entryId] with exactly [tagIds].
+  Future<void> _setEntryTags(
+    DatabaseExecutor txn,
+    int entryId,
+    List<int> tagIds,
+  ) async {
+    await txn.delete('time_entry_tags',
+        where: 'time_entry_id = ?', whereArgs: [entryId]);
+    for (final tagId in tagIds) {
+      await txn.insert('time_entry_tags', {'time_entry_id': entryId, 'tag_id': tagId});
+    }
+  }
+
+  // ---- Session tags (user-managed session journal labels) -------------
+
+  Future<List<SessionTag>> fetchTags() async {
+    final db = await _db;
+    final rows = await db.query('session_tags', orderBy: 'sort_order ASC');
+    return rows.map(SessionTag.fromMap).toList();
+  }
+
+  Future<int> createTag(String name) async {
+    final db = await _db;
+    final nextOrder = await _nextSortOrder(db, 'session_tags');
+    return db.insert('session_tags', {'name': name, 'sort_order': nextOrder});
+  }
+
+  Future<void> renameTag(int id, String name) async {
+    final db = await _db;
+    await db.update('session_tags', {'name': name}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Deletes a tag outright. Any session tagged with it just loses
+  /// that tag (the `time_entry_tags` join row is removed by the FK's
+  /// `ON DELETE CASCADE`) — nothing else about those sessions changes.
+  Future<void> deleteTag(int id) async {
+    final db = await _db;
+    await db.delete('session_tags', where: 'id = ?', whereArgs: [id]);
   }
 
   // ---- Project categories (user-managed types) --------------------------
@@ -268,16 +369,25 @@ class ProjectRepository {
     return rows.map(ProjectCategory.fromMap).toList();
   }
 
-  Future<int> createCategory(String name) async {
+  Future<int> createCategory(String name, IconData icon) async {
     final db = await _db;
     final nextOrder = await _nextSortOrder(db, 'project_categories');
-    return db.insert('project_categories', {'name': name, 'sort_order': nextOrder});
+    return db.insert('project_categories', {
+      'name': name,
+      'sort_order': nextOrder,
+      'icon_code_point': icon.codePoint,
+    });
   }
 
-  Future<void> renameCategory(int id, String name) async {
+  Future<void> updateCategory(int id,
+      {required String name, required IconData icon}) async {
     final db = await _db;
-    await db.update('project_categories', {'name': name},
-        where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'project_categories',
+      {'name': name, 'icon_code_point': icon.codePoint},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   /// Deletes a category outright. Any project tagged with it just

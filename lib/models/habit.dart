@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+
 /// How often a habit is expected to be done.
 enum HabitFrequency { daily, weekly }
 
@@ -27,6 +29,20 @@ HabitType habitTypeFromString(String value) {
   );
 }
 
+/// Which direction [Habit.dailyTarget] counts in, for a count/duration
+/// habit. Most habits are [atLeast] (do at least this much, e.g. 8
+/// glasses of water) — [atMost] flips that for a habit you're trying
+/// to cap rather than hit, e.g. "under 60 minutes of screen time" or
+/// "no more than 2 coffees."
+enum TargetMode { atLeast, atMost }
+
+TargetMode targetModeFromString(String value) {
+  return TargetMode.values.firstWhere(
+    (m) => m.name == value,
+    orElse: () => TargetMode.atLeast,
+  );
+}
+
 /// The fixed set of icons a habit can use. Kept as a single canonical
 /// list (rather than constructing `IconData` from a stored code point
 /// directly) so every reference to a habit's icon in source is a
@@ -43,6 +59,20 @@ const List<IconData> habitIconChoices = <IconData>[
   Icons.bedtime,
   Icons.self_improvement,
   Icons.directions_run,
+  Icons.spa_outlined,
+  Icons.restaurant_outlined,
+  Icons.local_florist_outlined,
+  Icons.music_note_outlined,
+  Icons.brush_outlined,
+  Icons.code,
+  Icons.savings_outlined,
+  Icons.cleaning_services_outlined,
+  Icons.pets_outlined,
+  Icons.wb_sunny_outlined,
+  Icons.language,
+  Icons.eco_outlined,
+  Icons.psychology_outlined,
+  Icons.no_drinks_outlined,
 ];
 
 /// Maps a code point loaded from the database back to one of
@@ -81,6 +111,11 @@ class Habit {
   final HabitType type;
   final int? dailyTarget;
 
+  /// For a count/duration habit, whether [dailyTarget] is a floor to
+  /// reach ([TargetMode.atLeast], the default) or a ceiling to stay
+  /// under ([TargetMode.atMost]). Ignored for boolean habits.
+  final TargetMode targetMode;
+
   /// A custom unit word for a [HabitType.count] habit, e.g. "pages" or
   /// "glasses" — shown instead of the generic "x" wherever a count is
   /// displayed (the habit card's daily progress, the log dialog, ...).
@@ -102,6 +137,7 @@ class Habit {
     this.targetPerWeek = 7,
     this.type = HabitType.boolean,
     this.dailyTarget,
+    this.targetMode = TargetMode.atLeast,
     this.unit,
     this.tolerancePerMonth = 0,
     this.color = Colors.teal,
@@ -111,13 +147,15 @@ class Habit {
   });
 
   /// The unit label shown next to amounts for count/duration habits,
-  /// e.g. "pages" or "min". Empty for boolean habits.
-  String get unitLabel => switch (type) {
+  /// e.g. "pages" or "min". Empty for boolean habits. A custom count
+  /// unit is shown exactly as the user typed it (not translated); the
+  /// generic fallback and the duration unit come from [t].
+  String unitLabel(AppLocalizations t) => switch (type) {
         HabitType.boolean => '',
         HabitType.count => (unit != null && unit!.trim().isNotEmpty)
             ? unit!.trim()
-            : 'x',
-        HabitType.duration => 'min',
+            : t.countUnitFallback,
+        HabitType.duration => t.minutesAbbrev,
       };
 
   Habit copyWith({
@@ -129,6 +167,7 @@ class Habit {
     HabitType? type,
     int? dailyTarget,
     bool clearDailyTarget = false,
+    TargetMode? targetMode,
     String? unit,
     bool clearUnit = false,
     int? tolerancePerMonth,
@@ -146,6 +185,7 @@ class Habit {
       type: type ?? this.type,
       dailyTarget:
           clearDailyTarget ? null : (dailyTarget ?? this.dailyTarget),
+      targetMode: targetMode ?? this.targetMode,
       unit: clearUnit ? null : (unit ?? this.unit),
       tolerancePerMonth: tolerancePerMonth ?? this.tolerancePerMonth,
       color: color ?? this.color,
@@ -164,6 +204,7 @@ class Habit {
       'target_per_week': targetPerWeek,
       'type': type.name,
       'daily_target': dailyTarget,
+      'target_mode': targetMode.name,
       'unit': unit,
       'tolerance_per_month': tolerancePerMonth,
       'color': color.value,
@@ -182,6 +223,7 @@ class Habit {
       targetPerWeek: map['target_per_week'] as int? ?? 7,
       type: habitTypeFromString(map['type'] as String? ?? 'boolean'),
       dailyTarget: map['daily_target'] as int?,
+      targetMode: targetModeFromString(map['target_mode'] as String? ?? 'atLeast'),
       unit: map['unit'] as String?,
       tolerancePerMonth: map['tolerance_per_month'] as int? ?? 0,
       color: Color(map['color'] as int),

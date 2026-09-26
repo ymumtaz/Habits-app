@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/project_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../models/project.dart';
 import '../services/recap_scheduler.dart';
 import '../utils/duration_format.dart';
@@ -103,24 +104,21 @@ class _RootNavScreenState extends State<RootNavScreen>
     ProjectProvider provider,
     String projectName,
   ) async {
-    final awayLabel = formatDurationCoarse(away);
+    final t = context.l10n;
+    final awayLabel = formatDurationCoarse(away, t);
     final trim = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Still working?'),
-        content: Text(
-          'The "$projectName" timer kept running while the app was in '
-          'the background for about $awayLabel. Trim that time from the '
-          'recorded session, or keep it as is?',
-        ),
+        title: Text(t.stillWorkingTitle),
+        content: Text(t.idleDialogMessage(projectName, awayLabel)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Keep it'),
+            child: Text(t.keepIt),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Trim $awayLabel'),
+            child: Text(t.trimLabel(awayLabel)),
           ),
         ],
       ),
@@ -137,21 +135,21 @@ class _RootNavScreenState extends State<RootNavScreen>
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.local_fire_department_outlined),
-            selectedIcon: Icon(Icons.local_fire_department),
-            label: 'Habits',
+            icon: const Icon(Icons.local_fire_department_outlined),
+            selectedIcon: const Icon(Icons.local_fire_department),
+            label: context.l10n.navHabits,
           ),
           NavigationDestination(
-            icon: Icon(Icons.folder_outlined),
-            selectedIcon: Icon(Icons.folder),
-            label: 'Projects',
+            icon: const Icon(Icons.folder_outlined),
+            selectedIcon: const Icon(Icons.folder),
+            label: context.l10n.navProjects,
           ),
           NavigationDestination(
-            icon: Icon(Icons.insights_outlined),
-            selectedIcon: Icon(Icons.insights),
-            label: 'Insights',
+            icon: const Icon(Icons.insights_outlined),
+            selectedIcon: const Icon(Icons.insights),
+            label: context.l10n.navInsights,
           ),
         ],
       ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/project_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/home_todo_section.dart';
 
 /// The standalone to-do list, reached via an icon on the Habits page
@@ -17,7 +18,7 @@ class TodosScreen extends StatelessWidget {
     final provider = context.watch<ProjectProvider>();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('To-dos')),
+      appBar: AppBar(title: Text(context.l10n.tasksTooltip)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: HomeTodoSection(provider: provider),

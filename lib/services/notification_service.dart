@@ -19,6 +19,7 @@ class NotificationService {
 
   static const _dailyId = 1001;
   static const _weeklyId = 1002;
+  static const _sessionId = 1003;
 
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
@@ -53,22 +54,27 @@ class NotificationService {
   Future<void> cancelWeekly() async => _plugin.cancel(_weeklyId);
 
   /// Schedules (replacing any existing one) the daily recap for
-  /// [hour]:[minute] local time, repeating every day, showing [body].
+  /// [hour]:[minute] local time, repeating every day, showing [title]
+  /// and [body] (both localized by the caller — this service has no
+  /// access to a [BuildContext]/locale of its own).
   Future<void> scheduleDaily({
     required int hour,
     required int minute,
+    required String title,
     required String body,
+    String channelName = 'Daily recap',
+    String channelDescription = 'A daily nudge summarizing today\'s habits',
   }) async {
     await _plugin.zonedSchedule(
       _dailyId,
-      'Daily recap',
+      title,
       body,
       _nextInstanceOfTime(hour, minute),
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails(
           'daily_recap',
-          'Daily recap',
-          channelDescription: 'A daily nudge summarizing today\'s habits',
+          channelName,
+          channelDescription: channelDescription,
           importance: Importance.defaultImportance,
         ),
       ),
@@ -81,23 +87,28 @@ class NotificationService {
 
   /// Schedules (replacing any existing one) the weekly recap for
   /// [hour]:[minute] local time on [weekday] (1=Mon..7=Sun), repeating
-  /// every week, showing [body].
+  /// every week, showing [title] and [body] (both localized by the
+  /// caller — this service has no access to a [BuildContext]/locale
+  /// of its own).
   Future<void> scheduleWeekly({
     required int weekday,
     required int hour,
     required int minute,
+    required String title,
     required String body,
+    String channelName = 'Weekly recap',
+    String channelDescription = 'A weekly summary of your habits',
   }) async {
     await _plugin.zonedSchedule(
       _weeklyId,
-      'Weekly recap',
+      title,
       body,
       _nextInstanceOfWeekdayTime(weekday, hour, minute),
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails(
           'weekly_recap',
-          'Weekly recap',
-          channelDescription: 'A weekly summary of your habits',
+          channelName,
+          channelDescription: channelDescription,
           importance: Importance.defaultImportance,
         ),
       ),
@@ -107,6 +118,81 @@ class NotificationService {
           UILocalNotificationDateInterpretation.absoluteTime,
     );
   }
+
+  /// Shows (or updates in place) an ongoing "session in progress"
+  /// notification with a live, minutes:seconds-ticking clock — [title]
+  /// is the fixed line ("Session in progress"), [body] the project
+  /// name. The clock itself is drawn by Android's own notification
+  /// chronometer, not by this app reposting every second: [baseEpochMillis]
+  /// is the moment the clock should read 00:00 (the session's start
+  /// time plus any time already spent paused), and Android ticks the
+  /// displayed minutes:seconds forward on its own from there — no
+  /// foreground service or periodic wakeups needed. Not dismissible by
+  /// a swipe (`ongoing`), silent (`playSound`/`enableVibration` off) so
+  /// starting or resuming a session doesn't buzz the phone.
+  Future<void> showSessionRunning({
+    required String title,
+    required String body,
+    required int baseEpochMillis,
+    String channelName = 'Session in progress',
+    String channelDescription = 'Shows the timer while a project session is running',
+  }) async {
+    await _plugin.show(
+      _sessionId,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          'session_progress',
+          channelName,
+          channelDescription: channelDescription,
+          importance: Importance.low,
+          priority: Priority.low,
+          ongoing: true,
+          autoCancel: false,
+          playSound: false,
+          enableVibration: false,
+          showWhen: true,
+          when: baseEpochMillis,
+          usesChronometer: true,
+          chronometerCountDown: false,
+        ),
+      ),
+    );
+  }
+
+  /// Same notification, frozen — used while the session is paused, so
+  /// the clock stops ticking instead of continuing to count up. [body]
+  /// is the fixed elapsed-time text at the moment it was paused.
+  Future<void> showSessionPaused({
+    required String title,
+    required String body,
+    String channelName = 'Session in progress',
+    String channelDescription = 'Shows the timer while a project session is running',
+  }) async {
+    await _plugin.show(
+      _sessionId,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          'session_progress',
+          channelName,
+          channelDescription: channelDescription,
+          importance: Importance.low,
+          priority: Priority.low,
+          ongoing: true,
+          autoCancel: false,
+          playSound: false,
+          enableVibration: false,
+          showWhen: false,
+          usesChronometer: false,
+        ),
+      ),
+    );
+  }
+
+  Future<void> cancelSessionNotification() async => _plugin.cancel(_sessionId);
 
   tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
     final now = tz.TZDateTime.now(tz.local);

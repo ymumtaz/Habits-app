@@ -1,42 +1,54 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/time_entry.dart';
+import 'tag_picker.dart';
 
 /// Result of the manual-entry dialog: when the session started, how
-/// long it lasted, and an optional note.
+/// long it lasted, an optional journal note, and its tags.
 class ManualEntryResult {
   final DateTime startedAt;
   final Duration duration;
+  final String title;
   final String? note;
+  final List<int> tagIds;
   const ManualEntryResult({
     required this.startedAt,
     required this.duration,
+    required this.title,
     this.note,
+    this.tagIds = const [],
   });
 }
 
 /// A dialog for logging a past project session by hand — a date/time,
-/// a duration, and an optional note — instead of running the live
-/// timer. Useful for backfilling work done before you started using
-/// the app. Pass [existing] to edit an already-logged session instead
-/// of creating a new one (its start time, duration, and note are
-/// prefilled).
+/// a duration, a note, and tags — instead of running the live timer.
+/// Useful for backfilling work done before you started using the app.
+/// Pass [existing] to edit an already-logged session instead of
+/// creating a new one (its start time, duration, and note are
+/// prefilled); pass its current tags as [existingTagIds] to prefill
+/// those too.
 ///
 /// Returns a [ManualEntryResult], or null if cancelled.
 Future<ManualEntryResult?> showAddManualEntryDialog(
   BuildContext context, {
   TimeEntry? existing,
+  List<int> existingTagIds = const [],
 }) {
   return showDialog<ManualEntryResult>(
     context: context,
-    builder: (context) => _AddManualEntryDialog(existing: existing),
+    builder: (context) => _AddManualEntryDialog(
+      existing: existing,
+      existingTagIds: existingTagIds,
+    ),
   );
 }
 
 class _AddManualEntryDialog extends StatefulWidget {
   final TimeEntry? existing;
-  const _AddManualEntryDialog({this.existing});
+  final List<int> existingTagIds;
+  const _AddManualEntryDialog({this.existing, this.existingTagIds = const []});
 
   @override
   State<_AddManualEntryDialog> createState() => _AddManualEntryDialogState();
@@ -47,7 +59,10 @@ class _AddManualEntryDialogState extends State<_AddManualEntryDialog> {
   late TimeOfDay _time;
   late final TextEditingController _hoursController;
   late final TextEditingController _minutesController;
+  late final TextEditingController _titleController;
   late final TextEditingController _noteController;
+  late Set<int> _selectedTagIds;
+  String? _titleError;
 
   bool get _isEditing => widget.existing != null;
 
@@ -62,13 +77,16 @@ class _AddManualEntryDialogState extends State<_AddManualEntryDialog> {
     _hoursController = TextEditingController(text: '${duration.inHours}');
     _minutesController =
         TextEditingController(text: '${duration.inMinutes % 60}');
+    _titleController = TextEditingController(text: existing?.title ?? '');
     _noteController = TextEditingController(text: existing?.note ?? '');
+    _selectedTagIds = {...widget.existingTagIds};
   }
 
   @override
   void dispose() {
     _hoursController.dispose();
     _minutesController.dispose();
+    _titleController.dispose();
     _noteController.dispose();
     super.dispose();
   }
@@ -95,8 +113,14 @@ class _AddManualEntryDialogState extends State<_AddManualEntryDialog> {
 
     if (duration <= Duration.zero) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Duration has to be more than 0.')),
+        SnackBar(content: Text(context.l10n.durationMustBeMoreThanZero)),
       );
+      return;
+    }
+
+    final title = _titleController.text.trim();
+    if (title.isEmpty) {
+      setState(() => _titleError = context.l10n.giveItAName);
       return;
     }
 
@@ -111,17 +135,20 @@ class _AddManualEntryDialogState extends State<_AddManualEntryDialog> {
     Navigator.of(context).pop(ManualEntryResult(
       startedAt: startedAt,
       duration: duration,
+      title: title,
       note: note.isEmpty ? null : note,
+      tagIds: _selectedTagIds.toList(),
     ));
   }
 
   @override
   Widget build(BuildContext context) {
-    final dateLabel = DateFormat('EEE, MMM d yyyy').format(_date);
+    final t = context.l10n;
+    final dateLabel = DateFormat('EEE, MMM d yyyy', t.locale.languageCode).format(_date);
     final timeLabel = _time.format(context);
 
     return AlertDialog(
-      title: Text(_isEditing ? 'Edit session' : 'Add a past session'),
+      title: Text(_isEditing ? t.editSessionTitle : t.addAPastSessionTitle),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -136,7 +163,7 @@ class _AddManualEntryDialogState extends State<_AddManualEntryDialog> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.access_time),
-              title: Text('Started at $timeLabel'),
+              title: Text(t.startedAtLabel(timeLabel)),
               onTap: _pickTime,
             ),
             const SizedBox(height: 8),
@@ -146,7 +173,7 @@ class _AddManualEntryDialogState extends State<_AddManualEntryDialog> {
                   child: TextField(
                     controller: _hoursController,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Hours'),
+                    decoration: InputDecoration(labelText: t.hoursLabel),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -154,19 +181,38 @@ class _AddManualEntryDialogState extends State<_AddManualEntryDialog> {
                   child: TextField(
                     controller: _minutesController,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Minutes'),
+                    decoration: InputDecoration(labelText: t.minutesLabel),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: _noteController,
-              decoration: const InputDecoration(
-                labelText: 'Note (optional)',
-                hintText: 'What did you work on?',
+              controller: _titleController,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                labelText: t.sessionTitleLabel,
+                hintText: t.sessionTitleHint,
+                errorText: _titleError,
               ),
-              maxLines: 2,
+              onChanged: (_) {
+                if (_titleError != null) setState(() => _titleError = null);
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _noteController,
+              decoration: InputDecoration(
+                labelText: t.notesOptionalLabel,
+                hintText: t.sessionNoteHint,
+                alignLabelWithHint: true,
+              ),
+              maxLines: 4,
+            ),
+            const SizedBox(height: 16),
+            TagPicker(
+              selectedTagIds: _selectedTagIds,
+              onChanged: (ids) => setState(() => _selectedTagIds = ids),
             ),
           ],
         ),
@@ -174,11 +220,11 @@ class _AddManualEntryDialogState extends State<_AddManualEntryDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(t.cancel),
         ),
         FilledButton(
           onPressed: _submit,
-          child: Text(_isEditing ? 'Save changes' : 'Add'),
+          child: Text(_isEditing ? t.saveChanges : t.add),
         ),
       ],
     );

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
+
 /// A compact month grid showing which days a habit was completed.
 /// Tapping a day toggles it — this is the "log to the past" entry
 /// point, and doubles as a monthly overview of the habit.
@@ -46,6 +48,7 @@ class _MonthlyHabitCalendarState extends State<MonthlyHabitCalendar> {
         DateTime(_visibleMonth.year, _visibleMonth.month + 1, 0).day;
     final firstWeekday = _visibleMonth.weekday; // 1 = Monday
     final today = _dayOnly(DateTime.now());
+    final t = context.l10n;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -63,11 +66,11 @@ class _MonthlyHabitCalendarState extends State<MonthlyHabitCalendar> {
             Column(
               children: [
                 Text(
-                  DateFormat('MMMM yyyy').format(_visibleMonth),
+                  DateFormat('MMMM yyyy', t.locale.languageCode).format(_visibleMonth),
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
                 Text(
-                  '$_completedThisMonth day${_completedThisMonth == 1 ? '' : 's'} completed',
+                  t.daysCompleted(_completedThisMonth),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -86,11 +89,11 @@ class _MonthlyHabitCalendarState extends State<MonthlyHabitCalendar> {
         const SizedBox(height: 4),
         Row(
           children: [
-            for (final label in const ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
+            for (var i = 0; i < 7; i++)
               Expanded(
                 child: Center(
                   child: Text(
-                    label,
+                    t.weekdayInitial(i),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),

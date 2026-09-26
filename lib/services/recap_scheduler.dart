@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
 import '../data/settings_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../utils/recap_text.dart';
 import 'notification_service.dart';
 
@@ -14,13 +15,17 @@ import 'notification_service.dart';
 Future<void> rescheduleRecaps(BuildContext context) async {
   final settings = context.read<SettingsProvider>();
   final habits = context.read<HabitProvider>();
+  final t = AppLocalizations(Locale(settings.languageCode));
   await NotificationService.instance.init();
 
   if (settings.dailyRecapEnabled) {
     await NotificationService.instance.scheduleDaily(
       hour: settings.dailyRecapHour,
       minute: settings.dailyRecapMinute,
-      body: dailyRecapText(habits),
+      title: t.dailyRecap,
+      body: dailyRecapText(habits, t),
+      channelName: t.dailyRecap,
+      channelDescription: t.dailyRecapChannelDescription,
     );
   } else {
     await NotificationService.instance.cancelDaily();
@@ -31,7 +36,10 @@ Future<void> rescheduleRecaps(BuildContext context) async {
       weekday: settings.weeklyRecapWeekday,
       hour: settings.weeklyRecapHour,
       minute: settings.weeklyRecapMinute,
-      body: weeklyRecapText(habits),
+      title: t.weeklyRecap,
+      body: weeklyRecapText(habits, t),
+      channelName: t.weeklyRecap,
+      channelDescription: t.weeklyRecapChannelDescription,
     );
   } else {
     await NotificationService.instance.cancelWeekly();

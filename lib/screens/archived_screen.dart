@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
 import '../data/project_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../models/habit.dart';
 import '../models/project.dart';
 import '../widgets/confirm_dialog.dart';
@@ -34,12 +35,13 @@ class _ArchivedScreenState extends State<ArchivedScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: const Text('Archived')),
+      appBar: AppBar(title: Text(t.archivedTitle)),
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
-          const _SectionHeader('Habits'),
+          _SectionHeader(t.homeTitle),
           FutureBuilder<List<Habit>>(
             future: _archivedHabits,
             builder: (context, snapshot) {
@@ -51,9 +53,9 @@ class _ArchivedScreenState extends State<ArchivedScreen> {
               }
               final habits = snapshot.data!;
               if (habits.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Text('No archived habits.'),
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Text(t.noArchivedHabits),
                 );
               }
               return Column(
@@ -72,19 +74,16 @@ class _ArchivedScreenState extends State<ArchivedScreen> {
                                   .unarchiveHabit(habit);
                               setState(_reload);
                             },
-                            child: const Text('Unarchive'),
+                            child: Text(t.unarchive),
                           ),
                           IconButton(
                             icon: const Icon(Icons.delete_outline),
-                            tooltip: 'Delete permanently',
+                            tooltip: t.deletePermanentlyTooltip,
                             onPressed: () async {
                               final confirmed = await confirmDelete(
                                 context,
-                                title: 'Delete "${habit.name}" forever?',
-                                message:
-                                    'This permanently deletes the habit and '
-                                    'its entire completion history. This '
-                                    'can\'t be undone.',
+                                title: t.deleteHabitForeverTitle(habit.name),
+                                message: t.deleteHabitForeverMessage,
                               );
                               if (!confirmed) return;
                               if (!context.mounted) return;
@@ -102,7 +101,7 @@ class _ArchivedScreenState extends State<ArchivedScreen> {
             },
           ),
           const Divider(height: 32),
-          const _SectionHeader('Projects'),
+          _SectionHeader(t.projectsTitle),
           FutureBuilder<List<Project>>(
             future: _archivedProjects,
             builder: (context, snapshot) {
@@ -114,9 +113,9 @@ class _ArchivedScreenState extends State<ArchivedScreen> {
               }
               final projects = snapshot.data!;
               if (projects.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Text('No archived projects.'),
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Text(t.noArchivedProjects),
                 );
               }
               return Column(
@@ -135,19 +134,16 @@ class _ArchivedScreenState extends State<ArchivedScreen> {
                                   .unarchiveProject(project);
                               setState(_reload);
                             },
-                            child: const Text('Unarchive'),
+                            child: Text(t.unarchive),
                           ),
                           IconButton(
                             icon: const Icon(Icons.delete_outline),
-                            tooltip: 'Delete permanently',
+                            tooltip: t.deletePermanentlyTooltip,
                             onPressed: () async {
                               final confirmed = await confirmDelete(
                                 context,
-                                title: 'Delete "${project.name}" forever?',
-                                message:
-                                    'This permanently deletes the project '
-                                    'and its entire tracked time history. '
-                                    'This can\'t be undone.',
+                                title: t.deleteProjectForeverTitle(project.name),
+                                message: t.deleteProjectForeverMessage,
                               );
                               if (!confirmed) return;
                               if (!context.mounted) return;

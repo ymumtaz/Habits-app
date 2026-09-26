@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/habit.dart';
 import '../models/habit_log.dart';
 
@@ -59,10 +60,12 @@ class _LogAmountDialogState extends State<_LogAmountDialog> {
   Widget build(BuildContext context) {
     final habit = widget.habit;
     final target = habit.dailyTarget;
+    final t = context.l10n;
     final isToday =
         HabitLog.dayOnly(widget.date) == HabitLog.dayOnly(DateTime.now());
-    final dateLabel =
-        isToday ? 'today' : DateFormat('EEE, MMM d').format(widget.date);
+    final dateLabel = isToday
+        ? t.todayLowercase
+        : DateFormat('EEE, MMM d', t.locale.languageCode).format(widget.date);
 
     return AlertDialog(
       title: Text('${habit.name} — $dateLabel'),
@@ -72,7 +75,7 @@ class _LogAmountDialogState extends State<_LogAmountDialog> {
           if (target != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: Text('Target: $target ${habit.unitLabel}'),
+              child: Text(t.targetLabel('$target ${habit.unitLabel(t)}')),
             ),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -88,7 +91,7 @@ class _LogAmountDialogState extends State<_LogAmountDialog> {
                   textAlign: TextAlign.center,
                   keyboardType: TextInputType.number,
                   style: Theme.of(context).textTheme.headlineSmall,
-                  decoration: InputDecoration(suffixText: habit.unitLabel),
+                  decoration: InputDecoration(suffixText: habit.unitLabel(context.l10n)),
                 ),
               ),
               IconButton(
@@ -102,16 +105,16 @@ class _LogAmountDialogState extends State<_LogAmountDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(0),
-          child: const Text('Clear'),
+          child: Text(t.clear),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(t.cancel),
         ),
         FilledButton(
           onPressed: () =>
               Navigator.of(context).pop(int.tryParse(_controller.text) ?? 0),
-          child: const Text('Save'),
+          child: Text(t.save),
         ),
       ],
     );

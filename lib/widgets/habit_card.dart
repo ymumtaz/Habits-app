@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/habit.dart';
 import '../services/streak_calculator.dart';
 import 'streak_badge.dart';
@@ -28,11 +29,13 @@ class HabitCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.l10n;
     final periodLabel = habit.frequency == HabitFrequency.daily
-        ? '${streak.completionsThisPeriod}/7 this week'
-        : '${streak.completionsThisPeriod}/${habit.targetPerWeek} this week';
+        ? t.completionsThisWeek(streak.completionsThisPeriod, 7)
+        : t.completionsThisWeek(
+            streak.completionsThisPeriod, habit.targetPerWeek);
     final frequencyLabel =
-        habit.frequency == HabitFrequency.daily ? 'Daily' : 'Weekly';
+        habit.frequency == HabitFrequency.daily ? t.frequencyDaily : t.frequencyWeekly;
     final subtitle = '$frequencyLabel · $periodLabel';
     final isBoolean = habit.type == HabitType.boolean;
     final target = habit.dailyTarget;
@@ -87,7 +90,10 @@ class HabitCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${todayAmount ?? 0}/$target ${habit.unitLabel} today',
+                        context.l10n.habitProgressToday(
+                          '${todayAmount ?? 0}/$target',
+                          habit.unitLabel(context.l10n),
+                        ),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: streak.completedToday
                                   ? habit.color

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
 import '../data/project_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../models/habit.dart';
 import '../widgets/habit_card.dart';
 import '../widgets/habit_summary_card.dart';
@@ -21,10 +22,11 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = context.watch<HabitProvider>();
     final projectProvider = context.watch<ProjectProvider>();
+    final t = context.l10n;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Habits'),
+        title: Text(t.homeTitle),
         actions: [
           IconButton(
             icon: projectProvider.todayTaskCount > 0
@@ -33,14 +35,14 @@ class HomeScreen extends StatelessWidget {
                     child: const Icon(Icons.checklist_outlined),
                   )
                 : const Icon(Icons.checklist_outlined),
-            tooltip: 'To-dos',
+            tooltip: t.tasksTooltip,
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const TodosScreen()),
             ),
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Settings',
+            tooltip: t.settingsTooltip,
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AppearanceScreen()),
             ),
@@ -120,7 +122,7 @@ class HomeScreen extends StatelessWidget {
                         if (context.mounted && removedLog != null) {
                           showUndoSnackBar(
                             context,
-                            message: 'Removed today\'s log',
+                            message: context.l10n.removedTodaysLog,
                             onUndo: () =>
                                 provider.restoreLog(habit, removedLog),
                           );
@@ -162,13 +164,12 @@ class _EmptyState extends StatelessWidget {
                 size: 64, color: Theme.of(context).colorScheme.outline),
             const SizedBox(height: 16),
             Text(
-              'No habits yet',
+              context.l10n.noHabitsYet,
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
             Text(
-              'Add your first habit — going to the gym, drinking enough '
-              'water, cutting screen time — and start a streak.',
+              context.l10n.noHabitsYetSubtitle,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
@@ -176,7 +177,7 @@ class _EmptyState extends StatelessWidget {
             FilledButton.icon(
               onPressed: onAdd,
               icon: const Icon(Icons.add),
-              label: const Text('Add a habit'),
+              label: Text(context.l10n.addAHabit),
             ),
           ],
         ),

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
 import '../data/settings_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../models/habit.dart';
 
 const _colorChoices = <Color>[
@@ -41,6 +42,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
   late HabitFrequency _frequency;
   late int _targetPerWeek;
   late HabitType _type;
+  late TargetMode _targetMode;
   late int _tolerancePerMonth;
   late Color _color;
   late IconData _icon;
@@ -55,6 +57,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
     _descriptionController =
         TextEditingController(text: h?.description ?? '');
     _type = h?.type ?? HabitType.boolean;
+    _targetMode = h?.targetMode ?? TargetMode.atLeast;
     _dailyTargetController = TextEditingController(
       text: '${h?.dailyTarget ?? _defaultTargetFor(_type)}',
     );
@@ -73,11 +76,19 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
         HabitType.boolean => _defaultCountTarget,
       };
 
-  String get _nameHint => switch (_type) {
-        HabitType.boolean => 'e.g. Go to the gym',
-        HabitType.count => 'e.g. Pages of book read',
-        HabitType.duration => 'e.g. Meditate',
+  String _nameHint(AppLocalizations t) => switch (_type) {
+        HabitType.boolean => t.habitNameHintBoolean,
+        HabitType.count => t.habitNameHintCount,
+        HabitType.duration => t.habitNameHintDuration,
       };
+
+  String _dailyTargetLabel(AppLocalizations t) {
+    final atMost = _targetMode == TargetMode.atMost;
+    if (_type == HabitType.count) {
+      return atMost ? t.dailyLimitCountLabel : t.dailyTargetCountLabel;
+    }
+    return atMost ? t.dailyLimitMinutesLabel : t.dailyTargetMinutesLabel;
+  }
 
   void _onTypeChanged(HabitType newType) {
     setState(() {
@@ -119,6 +130,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
       dailyTarget:
           needsTarget ? (int.tryParse(_dailyTargetController.text) ?? 1) : null,
       clearDailyTarget: !needsTarget,
+      targetMode: _targetMode,
       unit: (_type == HabitType.count && unit.isNotEmpty) ? unit : null,
       clearUnit: !(_type == HabitType.count && unit.isNotEmpty),
       tolerancePerMonth: _tolerancePerMonth,
@@ -137,8 +149,9 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: Text(_isEditing ? 'Edit habit' : 'New habit')),
+      appBar: AppBar(title: Text(_isEditing ? t.editHabitTitle : t.newHabitTitle)),
       body: Form(
         key: _formKey,
         child: ListView(
@@ -150,47 +163,68 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
               controller: _nameController,
               style: Theme.of(context).textTheme.titleLarge,
               decoration: InputDecoration(
-                labelText: 'Title',
-                hintText: _nameHint,
+                labelText: t.titleLabel,
+                hintText: _nameHint(t),
               ),
               validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Give it a title' : null,
+                  (v == null || v.trim().isEmpty) ? t.giveItATitle : null,
               textInputAction: TextInputAction.next,
             ),
             const SizedBox(height: 16),
             TextFormField(
               controller: _descriptionController,
               style: Theme.of(context).textTheme.bodyMedium,
-              decoration: const InputDecoration(
-                labelText: 'Notes (optional)',
+              decoration: InputDecoration(
+                labelText: t.notesOptionalLabel,
               ),
               maxLines: 2,
             ),
             const SizedBox(height: 24),
-            Text('Type', style: Theme.of(context).textTheme.titleSmall),
+            Text(t.typeLabel, style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
             SegmentedButton<HabitType>(
-              segments: const [
-                ButtonSegment(value: HabitType.boolean, label: Text('Done/not')),
-                ButtonSegment(value: HabitType.count, label: Text('Count')),
-                ButtonSegment(value: HabitType.duration, label: Text('Duration')),
+              segments: [
+                ButtonSegment(value: HabitType.boolean, label: Text(t.typeDoneNot)),
+                ButtonSegment(value: HabitType.count, label: Text(t.typeCount)),
+                ButtonSegment(value: HabitType.duration, label: Text(t.typeDuration)),
               ],
               selected: {_type},
               onSelectionChanged: (s) => _onTypeChanged(s.first),
             ),
             if (_type != HabitType.boolean) ...[
               const SizedBox(height: 16),
+              SegmentedButton<TargetMode>(
+                segments: [
+                  ButtonSegment(
+                    value: TargetMode.atLeast,
+                    label: Text(t.targetModeAtLeast),
+                  ),
+                  ButtonSegment(
+                    value: TargetMode.atMost,
+                    label: Text(t.targetModeAtMost),
+                  ),
+                ],
+                selected: {_targetMode},
+                onSelectionChanged: (s) =>
+                    setState(() => _targetMode = s.first),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _targetMode == TargetMode.atLeast
+                    ? t.targetModeAtLeastHelper
+                    : t.targetModeAtMostHelper,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: _dailyTargetController,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
-                  labelText: _type == HabitType.count
-                      ? 'Daily target (e.g. pages)'
-                      : 'Daily target (minutes)',
+                  labelText: _dailyTargetLabel(t),
                 ),
                 validator: (v) {
                   final n = int.tryParse(v ?? '');
-                  return (n == null || n <= 0) ? 'Enter a number > 0' : null;
+                  return (n == null || n <= 0) ? t.enterNumberGreaterThanZero : null;
                 },
               ),
             ],
@@ -198,24 +232,24 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _unitController,
-                decoration: const InputDecoration(
-                  labelText: 'Unit (optional)',
-                  hintText: 'e.g. pages, glasses, reps',
+                decoration: InputDecoration(
+                  labelText: t.unitOptionalLabel,
+                  hintText: t.unitHint,
                 ),
               ),
             ],
             const SizedBox(height: 24),
-            Text('Frequency', style: Theme.of(context).textTheme.titleSmall),
+            Text(t.frequencyLabel, style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
             SegmentedButton<HabitFrequency>(
-              segments: const [
+              segments: [
                 ButtonSegment(
                   value: HabitFrequency.daily,
-                  label: Text('Daily'),
+                  label: Text(t.frequencyDaily),
                 ),
                 ButtonSegment(
                   value: HabitFrequency.weekly,
-                  label: Text('Weekly'),
+                  label: Text(t.frequencyWeekly),
                 ),
               ],
               selected: {_frequency},
@@ -224,7 +258,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
             ),
             if (_frequency == HabitFrequency.weekly) ...[
               const SizedBox(height: 16),
-              Text('Target per week',
+              Text(t.targetPerWeekLabel,
                   style: Theme.of(context).textTheme.titleSmall),
               Slider(
                 value: _targetPerWeek.toDouble(),
@@ -238,19 +272,13 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
             ],
             const SizedBox(height: 16),
             Text(
-              'Tolerance: allow $_tolerancePerMonth missed '
-              'day${_tolerancePerMonth == 1 ? '' : 's'}/month',
+              t.toleranceLabel(_tolerancePerMonth),
               style: Theme.of(context).textTheme.titleSmall,
             ),
             Text(
               _frequency == HabitFrequency.daily
-                  ? 'A tolerated miss doesn\'t break your streak — like a '
-                      'built-in streak freeze that resets each calendar '
-                      'month.'
-                  : 'If a week falls short of target, the shortfall '
-                      '(days short of target) is covered by this budget '
-                      'instead of breaking your streak — resets each '
-                      'calendar month.',
+                  ? t.toleranceDailyExplainer
+                  : t.toleranceWeeklyExplainer,
               style: Theme.of(context).textTheme.bodySmall,
             ),
             Slider(
@@ -263,7 +291,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
                   setState(() => _tolerancePerMonth = v.round()),
             ),
             const SizedBox(height: 24),
-            Text('Icon', style: Theme.of(context).textTheme.titleSmall),
+            Text(t.iconLabel, style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -279,7 +307,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
               ],
             ),
             const SizedBox(height: 24),
-            Text('Color', style: Theme.of(context).textTheme.titleSmall),
+            Text(t.colorLabel, style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -297,7 +325,7 @@ class _AddEditHabitScreenState extends State<AddEditHabitScreen> {
             const SizedBox(height: 32),
             FilledButton(
               onPressed: _save,
-              child: Text(_isEditing ? 'Save changes' : 'Create habit'),
+              child: Text(_isEditing ? t.saveChanges : t.createHabit),
             ),
           ],
         ),

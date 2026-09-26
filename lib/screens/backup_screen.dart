@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
 import '../data/project_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../services/backup_service.dart';
 
 /// Export the whole local database to a file you can save/share
@@ -26,13 +27,14 @@ class _BackupScreenState extends State<BackupScreen> {
       _busy = true;
       _status = null;
     });
+    final t = context.l10n;
     try {
       await BackupService.exportBackup();
       if (!mounted) return;
-      setState(() => _status = 'Backup created — choose where to save it.');
+      setState(() => _status = t.backupCreatedStatus);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Export failed: $e');
+      setState(() => _status = t.exportFailedStatus(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -48,13 +50,13 @@ class _BackupScreenState extends State<BackupScreen> {
       _status = null;
     });
 
+    final t = context.l10n;
     final looksValid = await BackupService.looksLikeValidBackup(file);
     if (!looksValid) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _status = "That file doesn't look like a habits app backup — "
-            'nothing was changed.';
+        _status = t.notAValidBackupStatus;
       });
       return;
     }
@@ -63,16 +65,12 @@ class _BackupScreenState extends State<BackupScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Restore this backup?'),
-        content: const Text(
-          'This replaces ALL current habits, logs, projects, and tracked '
-          "time with what's in this backup file. Anything you've done "
-          "since that backup was made will be lost. This can't be undone.",
-        ),
+        title: Text(t.restoreBackupTitle),
+        content: Text(t.restoreBackupMessage),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text(t.cancel),
           ),
           FilledButton.tonal(
             onPressed: () => Navigator.of(context).pop(true),
@@ -80,7 +78,7 @@ class _BackupScreenState extends State<BackupScreen> {
               backgroundColor: Theme.of(context).colorScheme.errorContainer,
               foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
             ),
-            child: const Text('Restore'),
+            child: Text(t.restore),
           ),
         ],
       ),
@@ -97,12 +95,10 @@ class _BackupScreenState extends State<BackupScreen> {
       if (!mounted) return;
       await context.read<ProjectProvider>().load();
       if (!mounted) return;
-      setState(() => _status =
-          "Restored. Your habits and projects are back to that backup's "
-          'state.');
+      setState(() => _status = t.restoredStatus);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Restore failed: $e');
+      setState(() => _status = t.restoreFailedStatus(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -110,28 +106,27 @@ class _BackupScreenState extends State<BackupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: const Text('Backup & restore')),
+      appBar: AppBar(title: Text(t.backupRestore)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'Everything lives only on this phone — habits, logs, projects, '
-            'and every tracked minute. Export a backup now and then so a '
-            "lost or wiped phone can't take years of history with it.",
+            t.backupRestoreExplainer,
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: _busy ? null : _export,
             icon: const Icon(Icons.upload_outlined),
-            label: const Text('Export backup'),
+            label: Text(t.exportBackup),
           ),
           const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: _busy ? null : _restore,
             icon: const Icon(Icons.download_outlined),
-            label: const Text('Restore from backup'),
+            label: Text(t.restoreFromBackup),
           ),
           if (_busy) ...[
             const SizedBox(height: 24),

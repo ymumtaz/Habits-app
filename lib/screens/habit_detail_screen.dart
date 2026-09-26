@@ -3,9 +3,12 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../models/habit.dart';
 import '../services/streak_calculator.dart';
+import '../utils/habit_stats.dart';
 import '../widgets/confirm_dialog.dart';
+import '../widgets/daily_bar_strip.dart';
 import '../widgets/log_amount_dialog.dart';
 import '../widgets/milestone_badges.dart';
 import '../widgets/monthly_habit_calendar.dart';
@@ -29,11 +32,12 @@ Future<void> _toggleDayWithConfirm(
   final isLogged = provider.doneDatesFor(habit).contains(
       DateTime(day.year, day.month, day.day));
   if (isLogged) {
+    final t = context.l10n;
+    final dateStr = DateFormat('EEE, MMM d', t.locale.languageCode).format(day);
     final confirmed = await confirmDelete(
       context,
-      title: 'Remove this log?',
-      message: 'This removes ${habit.name}\'s completion for '
-          '${DateFormat('EEE, MMM d').format(day)}. This can\'t be undone.',
+      title: t.removeLogTitle,
+      message: t.removeLogMessage(habit.name, dateStr),
     );
     if (!confirmed) return;
     final removedLog = provider.logOn(habit, day);
@@ -41,7 +45,7 @@ Future<void> _toggleDayWithConfirm(
     if (context.mounted) {
       showUndoSnackBar(
         context,
-        message: 'Removed ${DateFormat('EEE, MMM d').format(day)}',
+        message: t.removedOnDate(dateStr),
         onUndo: () {
           if (removedLog != null) {
             provider.restoreLog(habit, removedLog);
@@ -78,9 +82,10 @@ Future<void> _logAmountFor(
       final removedLog = provider.logOn(habit, day);
       await provider.removeLogForDate(habit, day);
       if (context.mounted && removedLog != null) {
+        final t = context.l10n;
         showUndoSnackBar(
           context,
-          message: 'Removed ${DateFormat('EEE, MMM d').format(day)}',
+          message: t.removedOnDate(DateFormat('EEE, MMM d', t.locale.languageCode).format(day)),
           onUndo: () => provider.restoreLog(habit, removedLog),
         );
       }
@@ -110,12 +115,13 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
   Future<void> _share(Habit current, StreakResult streak) async {
     if (_sharing) return;
     setState(() => _sharing = true);
+    final t = context.l10n;
     try {
-      await shareStreakCard(_shareKey, current, streak);
+      await shareStreakCard(_shareKey, current, streak, t);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Couldn't share streak: $e")),
+          SnackBar(content: Text(t.couldntShareStreak(e))),
         );
       }
     } finally {
@@ -137,6 +143,8 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
     final streak = provider.streakFor(current);
     final isBoolean = current.type == HabitType.boolean;
     final todayAmount = provider.amountOn(current, DateTime.now());
+    final last7Days = habitLast7DaysValuesFor(provider, current);
+    final t = context.l10n;
 
     return Scaffold(
       appBar: AppBar(
@@ -150,7 +158,7 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.ios_share),
-            tooltip: 'Share streak',
+            tooltip: t.shareStreakTooltip,
             onPressed: _sharing ? null : () => _share(current, streak),
           ),
           IconButton(
@@ -169,18 +177,17 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
               } else if (value == 'delete') {
                 final confirmed = await confirmDelete(
                   context,
-                  title: 'Delete "${current.name}"?',
-                  message: 'This permanently deletes the habit and its '
-                      'entire completion history. This can\'t be undone.',
+                  title: t.deleteHabitTitle(current.name),
+                  message: t.deleteHabitMessage,
                 );
                 if (!confirmed) return;
                 await provider.deleteHabit(current);
                 if (context.mounted) Navigator.of(context).pop();
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'archive', child: Text('Archive')),
-              PopupMenuItem(value: 'delete', child: Text('Delete')),
+            itemBuilder: (context) => [
+              PopupMenuItem(value: 'archive', child: Text(t.archiveMenuItem)),
+              PopupMenuItem(value: 'delete', child: Text(t.deleteMenuItem)),
             ],
           ),
         ],
@@ -198,9 +205,9 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
             children: [
           Row(
             children: [
-              _Stat(label: 'Current streak', value: '${streak.currentStreak}'),
-              _Stat(label: 'Best streak', value: '${streak.bestStreak}'),
-              _Stat(label: 'Streak score', value: '${streak.score}'),
+              _Stat(label: t.currentStreak, value: '${streak.currentStreak}'),
+              _Stat(label: t.bestStreak, value: '${streak.bestStreak}'),
+              _Stat(label: t.consistencyScoreLabel, value: '${streak.consistencyScore}'),
             ],
           ),
           const SizedBox(height: 8),
@@ -214,8 +221,7 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
             const SizedBox(height: 4),
             Center(
               child: Text(
-                'Tolerates ${current.tolerancePerMonth} missed '
-                'day${current.tolerancePerMonth == 1 ? '' : 's'}/month',
+                t.toleratesMissedDays(current.tolerancePerMonth),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -228,7 +234,7 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
                 streak.completedToday ? Icons.check_circle : Icons.add_task,
               ),
               label: Text(
-                streak.completedToday ? 'Completed today' : 'Mark done today',
+                streak.completedToday ? t.completedToday : t.markDoneToday,
               ),
             )
           else
@@ -240,37 +246,53 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
               ),
               label: Text(
                 todayAmount == null
-                    ? 'Log today\'s ${current.unitLabel}'
-                    : '$todayAmount ${current.unitLabel} logged today'
-                        '${current.dailyTarget != null ? ' / ${current.dailyTarget}' : ''}',
+                    ? context.l10n.logTodaysAmountLabel(current.unitLabel(context.l10n))
+                    : context.l10n.loggedTodayAmount(
+                        '$todayAmount',
+                        current.unitLabel(context.l10n),
+                        current.dailyTarget != null ? ' / ${current.dailyTarget}' : '',
+                      ),
               ),
             ),
           const SizedBox(height: 24),
+          Text(t.last7Days, style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 12),
+          DailyBarStrip(
+            days: [for (final r in last7Days) r.day],
+            values: [for (final r in last7Days) r.rate],
+            color: current.color,
+            maxValue: isBoolean
+                ? 1.0
+                : [
+                    if (current.dailyTarget != null) current.dailyTarget!.toDouble(),
+                    for (final r in last7Days) r.rate,
+                  ].reduce((a, b) => a > b ? a : b).clamp(1.0, double.infinity).toDouble(),
+            valueLabelBuilder: (v) => isBoolean
+                ? (v > 0 ? '✓' : '')
+                : (v > 0 ? '${v.round()}' : ''),
+          ),
+          const SizedBox(height: 24),
           if (!isBoolean) ...[
-            Text('By day of the week',
+            Text(t.byDayOfWeek,
                 style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 4),
             Text(
-              'Average ${current.unitLabel} logged on each weekday.',
+              t.averageLoggedPerWeekday(current.unitLabel(t)),
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
             WeekdayBarChart(
               logs: provider.rawLogsFor(current.id!),
               color: current.color,
-              unitLabel: current.unitLabel,
+              unitLabel: current.unitLabel(t),
             ),
             const SizedBox(height: 24),
           ],
-          Text('Monthly overview',
+          Text(t.monthlyOverview,
               style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 4),
           Text(
-            isBoolean
-                ? 'Tap any past day to log or undo it — handy for '
-                    'backfilling or testing the streak without waiting for '
-                    'real days to pass.'
-                : 'Tap any day to log or edit its amount.',
+            isBoolean ? t.tapPastDayBoolean : t.tapDayToLogAmount,
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
@@ -289,10 +311,10 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
               ),
             ),
             icon: const Icon(Icons.grid_view_outlined),
-            label: const Text('View yearly heatmap'),
+            label: Text(t.viewYearlyHeatmap),
           ),
           const SizedBox(height: 24),
-          Text('Recent history', style: Theme.of(context).textTheme.titleSmall),
+          Text(t.recentHistory, style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
               _HistoryList(habit: current),
             ],
@@ -349,15 +371,16 @@ class _HistoryList extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = context.watch<HabitProvider>();
     final logs = provider.rawLogsFor(habit.id!);
+    final t = context.l10n;
 
     if (logs.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 16),
-        child: Text('No completions logged yet.'),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Text(t.noCompletionsLoggedYet),
       );
     }
 
-    final formatter = DateFormat('EEE, MMM d');
+    final formatter = DateFormat('EEE, MMM d', t.locale.languageCode);
     return Column(
       children: [
         for (final log in logs.take(30))
@@ -367,25 +390,24 @@ class _HistoryList extends StatelessWidget {
             leading: const Icon(Icons.check_circle_outline),
             title: Text(formatter.format(log.date)),
             subtitle: log.amount != null
-                ? Text('${log.amount} ${habit.unitLabel}')
+                ? Text('${log.amount} ${habit.unitLabel(t)}')
                 : null,
             trailing: IconButton(
               iconSize: 18,
               icon: const Icon(Icons.close),
-              tooltip: 'Remove this day',
+              tooltip: t.removeThisDayTooltip,
               onPressed: () async {
                 final confirmed = await confirmDelete(
                   context,
-                  title: 'Remove this log?',
-                  message: 'This removes ${habit.name}\'s completion for '
-                      '${formatter.format(log.date)}. This can\'t be undone.',
+                  title: t.removeLogTitle,
+                  message: t.removeLogMessage(habit.name, formatter.format(log.date)),
                 );
                 if (!confirmed) return;
                 await provider.removeLogForDate(habit, log.date);
                 if (context.mounted) {
                   showUndoSnackBar(
                     context,
-                    message: 'Removed ${formatter.format(log.date)}',
+                    message: t.removedOnDate(formatter.format(log.date)),
                     onUndo: () => provider.restoreLog(habit, log),
                   );
                 }

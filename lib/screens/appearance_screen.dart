@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/settings_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../models/habit.dart';
 import '../services/notification_service.dart';
 import '../services/recap_scheduler.dart';
@@ -9,20 +10,11 @@ import '../theme/app_theme.dart';
 import '../theme/theme_provider.dart';
 import 'archived_screen.dart';
 import 'backup_screen.dart';
+import 'manage_session_tags_screen.dart';
 
-const _weekdayNames = {
-  DateTime.monday: 'Monday',
-  DateTime.tuesday: 'Tuesday',
-  DateTime.wednesday: 'Wednesday',
-  DateTime.thursday: 'Thursday',
-  DateTime.friday: 'Friday',
-  DateTime.saturday: 'Saturday',
-  DateTime.sunday: 'Sunday',
-};
-
-/// App-wide settings: appearance (theme), time format, first day of
-/// the week, default habit frequency, and the daily/weekly recap
-/// notification schedule.
+/// App-wide settings: appearance (theme), language, time format, first
+/// day of the week, default habit frequency, and the daily/weekly
+/// recap notification schedule.
 class AppearanceScreen extends StatelessWidget {
   const AppearanceScreen({super.key});
 
@@ -30,13 +22,14 @@ class AppearanceScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
     final settings = context.watch<SettingsProvider>();
+    final t = context.l10n;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: Text(t.settingsTitle)),
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
-          const _SectionHeader('Appearance'),
+          _SectionHeader(t.sectionAppearance),
           for (final option in AppThemeOption.values)
             RadioListTile<AppThemeOption>(
               value: option,
@@ -44,28 +37,43 @@ class AppearanceScreen extends StatelessWidget {
               onChanged: (value) {
                 if (value != null) themeProvider.setOption(value);
               },
-              title: Text(option.label),
+              title: Text(option.label(t)),
               secondary: CircleAvatar(
                 backgroundColor: option.swatch,
                 radius: 14,
               ),
             ),
           const Divider(height: 32),
-          const _SectionHeader('Time format'),
+          _SectionHeader(t.sectionLanguage),
+          RadioListTile<String>(
+            value: 'en',
+            groupValue: settings.languageCode,
+            onChanged: (v) {
+              if (v != null) settings.setLanguageCode(v);
+            },
+            title: Text(t.languageEnglish),
+          ),
+          RadioListTile<String>(
+            value: 'tr',
+            groupValue: settings.languageCode,
+            onChanged: (v) {
+              if (v != null) settings.setLanguageCode(v);
+            },
+            title: Text(t.languageTurkish),
+          ),
+          const Divider(height: 32),
+          _SectionHeader(t.sectionTimeFormat),
           SwitchListTile(
-            title: const Text('Use 24-hour time'),
+            title: Text(t.use24HourTime),
             subtitle: Text(settings.use24HourTime ? '14:30' : '2:30 PM'),
             value: settings.use24HourTime,
             onChanged: settings.setUse24HourTime,
           ),
           const Divider(height: 32),
-          const _SectionHeader('Week'),
+          _SectionHeader(t.sectionWeek),
           ListTile(
-            title: const Text('First day of the week'),
-            subtitle: const Text(
-              'Sets the week boundary used for weekly habit streaks, '
-              'weekly time goals, and "this week" figures in Insights.',
-            ),
+            title: Text(t.firstDayOfWeek),
+            subtitle: Text(t.firstDayOfWeekSubtitle),
           ),
           RadioListTile<int>(
             value: DateTime.monday,
@@ -73,7 +81,7 @@ class AppearanceScreen extends StatelessWidget {
             onChanged: (v) {
               if (v != null) settings.setFirstDayOfWeek(v);
             },
-            title: const Text('Monday'),
+            title: Text(t.weekdayName(DateTime.monday)),
           ),
           RadioListTile<int>(
             value: DateTime.sunday,
@@ -81,16 +89,59 @@ class AppearanceScreen extends StatelessWidget {
             onChanged: (v) {
               if (v != null) settings.setFirstDayOfWeek(v);
             },
-            title: const Text('Sunday'),
+            title: Text(t.weekdayName(DateTime.sunday)),
           ),
           const Divider(height: 32),
-          const _SectionHeader('Notifications'),
+          _SectionHeader(t.sectionSessions),
+          ListTile(
+            title: Text(t.defaultSessionLength),
+            subtitle: Text(t.defaultSessionLengthSubtitle),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  onPressed: () => settings.setDefaultCountdownMinutes(
+                    settings.defaultCountdownMinutes - 5,
+                  ),
+                  icon: const Icon(Icons.remove_circle_outline),
+                ),
+                SizedBox(
+                  width: 90,
+                  child: Text(
+                    '${settings.defaultCountdownMinutes} ${t.minutesAbbrev}',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => settings.setDefaultCountdownMinutes(
+                    settings.defaultCountdownMinutes + 5,
+                  ),
+                  icon: const Icon(Icons.add_circle_outline),
+                ),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.sell_outlined),
+            title: Text(t.sessionTags),
+            subtitle: Text(t.sessionTagsSubtitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ManageSessionTagsScreen()),
+            ),
+          ),
+          const Divider(height: 32),
+          _SectionHeader(t.sectionNotifications),
           SwitchListTile(
-            title: const Text('Daily recap'),
+            title: Text(t.dailyRecap),
             subtitle: Text(
               settings.dailyRecapEnabled
-                  ? 'Reminds you at ${_formatTime(settings.dailyRecapHour, settings.dailyRecapMinute)}'
-                  : 'A nightly nudge with how many habits you completed today',
+                  ? t.dailyRecapEnabledSubtitle(
+                      _formatTime(t, settings.dailyRecapHour, settings.dailyRecapMinute))
+                  : t.dailyRecapDisabledSubtitle,
             ),
             value: settings.dailyRecapEnabled,
             onChanged: (value) async {
@@ -102,9 +153,9 @@ class AppearanceScreen extends StatelessWidget {
           if (settings.dailyRecapEnabled)
             ListTile(
               contentPadding: const EdgeInsets.only(left: 32, right: 16),
-              title: const Text('Time'),
+              title: Text(t.time),
               trailing: Text(
-                _formatTime(settings.dailyRecapHour, settings.dailyRecapMinute),
+                _formatTime(t, settings.dailyRecapHour, settings.dailyRecapMinute),
               ),
               onTap: () async {
                 final picked = await showTimePicker(
@@ -120,12 +171,15 @@ class AppearanceScreen extends StatelessWidget {
               },
             ),
           SwitchListTile(
-            title: const Text('Weekly recap'),
+            title: Text(t.weeklyRecap),
             subtitle: Text(
               settings.weeklyRecapEnabled
-                  ? 'Reminds you ${_weekdayNames[settings.weeklyRecapWeekday]} '
-                      'at ${_formatTime(settings.weeklyRecapHour, settings.weeklyRecapMinute)}'
-                  : 'A weekly nudge summarizing the past 7 days',
+                  ? t.weeklyRecapEnabledSubtitle(
+                      t.weekdayName(settings.weeklyRecapWeekday),
+                      _formatTime(
+                          t, settings.weeklyRecapHour, settings.weeklyRecapMinute),
+                    )
+                  : t.weeklyRecapDisabledSubtitle,
             ),
             value: settings.weeklyRecapEnabled,
             onChanged: (value) async {
@@ -137,12 +191,21 @@ class AppearanceScreen extends StatelessWidget {
           if (settings.weeklyRecapEnabled) ...[
             ListTile(
               contentPadding: const EdgeInsets.only(left: 32, right: 16),
-              title: const Text('Day'),
+              title: Text(t.day),
               trailing: DropdownButton<int>(
                 value: settings.weeklyRecapWeekday,
                 items: [
-                  for (final entry in _weekdayNames.entries)
-                    DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+                  for (final weekday in [
+                    DateTime.monday,
+                    DateTime.tuesday,
+                    DateTime.wednesday,
+                    DateTime.thursday,
+                    DateTime.friday,
+                    DateTime.saturday,
+                    DateTime.sunday,
+                  ])
+                    DropdownMenuItem(
+                        value: weekday, child: Text(t.weekdayName(weekday))),
                 ],
                 onChanged: (v) async {
                   if (v == null) return;
@@ -157,10 +220,10 @@ class AppearanceScreen extends StatelessWidget {
             ),
             ListTile(
               contentPadding: const EdgeInsets.only(left: 32, right: 16),
-              title: const Text('Time'),
+              title: Text(t.time),
               trailing: Text(
                 _formatTime(
-                    settings.weeklyRecapHour, settings.weeklyRecapMinute),
+                    t, settings.weeklyRecapHour, settings.weeklyRecapMinute),
               ),
               onTap: () async {
                 final picked = await showTimePicker(
@@ -181,10 +244,10 @@ class AppearanceScreen extends StatelessWidget {
             ),
           ],
           const Divider(height: 32),
-          const _SectionHeader('New habits'),
+          _SectionHeader(t.sectionNewHabits),
           ListTile(
-            title: const Text('Default frequency'),
-            subtitle: const Text('Used to pre-fill the "Add habit" screen'),
+            title: Text(t.defaultFrequency),
+            subtitle: Text(t.defaultFrequencySubtitle),
           ),
           RadioListTile<HabitFrequency>(
             value: HabitFrequency.daily,
@@ -192,7 +255,7 @@ class AppearanceScreen extends StatelessWidget {
             onChanged: (v) {
               if (v != null) settings.setDefaultHabitFrequency(v);
             },
-            title: const Text('Daily'),
+            title: Text(t.frequencyDaily),
           ),
           RadioListTile<HabitFrequency>(
             value: HabitFrequency.weekly,
@@ -200,24 +263,22 @@ class AppearanceScreen extends StatelessWidget {
             onChanged: (v) {
               if (v != null) settings.setDefaultHabitFrequency(v);
             },
-            title: const Text('Weekly'),
+            title: Text(t.frequencyWeekly),
           ),
           const Divider(height: 32),
-          const _SectionHeader('Data'),
+          _SectionHeader(t.sectionData),
           ListTile(
             leading: const Icon(Icons.inventory_2_outlined),
-            title: const Text('Archived'),
-            subtitle: const Text('View, restore, or permanently delete '
-                'archived habits and projects'),
+            title: Text(t.archived),
+            subtitle: Text(t.archivedSubtitle),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ArchivedScreen()),
             ),
           ),
           ListTile(
             leading: const Icon(Icons.backup_outlined),
-            title: const Text('Backup & restore'),
-            subtitle: const Text('Export everything to a file, or restore '
-                'from a previous export'),
+            title: Text(t.backupRestore),
+            subtitle: Text(t.backupRestoreSubtitle),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const BackupScreen()),
             ),
@@ -228,9 +289,9 @@ class AppearanceScreen extends StatelessWidget {
   }
 }
 
-String _formatTime(int hour, int minute) {
+String _formatTime(AppLocalizations t, int hour, int minute) {
   final h = hour % 12 == 0 ? 12 : hour % 12;
-  final period = hour < 12 ? 'AM' : 'PM';
+  final period = hour < 12 ? t.am : t.pm;
   final m = minute.toString().padLeft(2, '0');
   return '$h:$m $period';
 }

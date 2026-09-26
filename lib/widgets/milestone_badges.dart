@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/streak_calculator.dart';
 
 /// A row of milestone badges (7/30/100/365-day streaks) — filled and
@@ -51,8 +52,8 @@ class _MilestoneChip extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Tooltip(
       message: earned
-          ? '$threshold-day streak reached'
-          : '$threshold-day streak — not reached yet',
+          ? context.l10n.streakReachedTooltip(threshold)
+          : context.l10n.streakNotReachedTooltip(threshold),
       child: Chip(
         avatar: Icon(
           Icons.emoji_events,

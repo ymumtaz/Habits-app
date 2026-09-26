@@ -111,13 +111,130 @@ building views on top:
   simply haven't reached yet. Hand-rolled (no charting package added),
   matching the yearly heatmap's approach of a small custom widget
   colored with the habit's own color.
-- ✅ **Cross-habit dashboard (M)** — Done: a new "Insights" tab (Habits
-  sub-tab) shows this month's overall completion rate and every habit
-  ranked best-to-worst. A compact summary card also sits at the top of
-  the Habits screen linking into it.
-- ✅ **Cross-project time dashboard (M)** — Done: the Insights tab's
-  Projects sub-tab shows total tracked time for week/month/year (a
-  toggle), broken down by project as a ranked bar list.
+- ✅ **Cross-habit dashboard (M)** — Done, then redesigned based on
+  feedback that the ranked-list version "wasn't looking good" and
+  duplicated what the habit detail page already showed better: the
+  Insights → Habits tab is no longer a ranked list — it's a
+  dropdown habit switcher followed by that one habit's own stats,
+  gathered from its detail page (current/best streak, streak score,
+  this month's completion, a "Last 7 days" strip, and — for
+  count/duration habits — the "by day of the week" chart), plus an
+  "Open full habit page" shortcut. Pick any habit from the dropdown
+  to flip its stats in place, rather than scrolling a list or
+  leaving Insights.
+- ✅ **Cross-project time dashboard (M)** — Done, then redesigned the
+  same way as the habits tab: Insights → Projects is now a dropdown
+  project switcher, a week/month/year toggle that scopes the "Total
+  tracked" figure to whichever project is selected (it used to total
+  across every project regardless of which one you were looking at),
+  "This week"/"This month" stats, a per-project "Last 7 days" bar
+  strip, and a per-project "This month" bubble calendar — the same
+  pieces shown on that project's own detail page, put together in
+  one switchable view, plus an "Open full project page" shortcut.
+  The earlier all-projects-at-once stacked column chart and ranked
+  bar list were dropped in favor of this per-project view.
+- ✅ **Insights switcher: arrows *and* a dropdown, monthly chart for
+  habits too (S)** — Done: the "‹ name ›" switcher on both Insights
+  tabs now also opens a dropdown of every habit/project when you tap
+  the name itself (a small chevron hints at it) — same look otherwise,
+  just a faster way to jump straight to one instead of stepping
+  through with the arrows. The Habits tab's "By day of the week" chart
+  was dropped from Insights (it's still on each habit's own detail
+  page) in favor of a "This month" bubble calendar matching what the
+  Projects tab already had, so both tabs now show the same last-7-days
+  strip + monthly calendar shape.
+  Separately, the monthly bubble calendar itself (used here and on
+  each habit/project detail page) was redesigned based on feedback
+  that it "didn't even display the days of the month" like the
+  Google Fit reference it's modeled on: every cell now always shows
+  its day number (white, bold, centered inside the filled circle for
+  a day with time logged; plain muted number with no circle at all
+  for a zero day — dropped the old hollow-ring treatment), and a
+  "Weekly totals" list now sits below the grid, breaking the month
+  down by calendar week the way Google Fit's monthly view does.
+  Fixed once more based on feedback that a boundary week showed a
+  truncated range like "Sep 28 – 30" instead of a real Monday–Sunday
+  week: the widget now has a `gridRange()` helper describing the full
+  calendar-week span it renders (padding a few days into the
+  neighboring month when the 1st doesn't land on the week's first
+  day), and callers fetch duration data across that whole range —
+  not just the target month — so every weekly-totals row shows and
+  sums a genuine full week, including the days that spill into the
+  next or previous month.
+- ✅ **Session journal — notes, tags, and a harder-to-fumble "end
+  session" (M)** — Feedback that ending a session was a single
+  instant tap, easy to trigger by accident and record a 2-second
+  session in a blink, and that a session should work more like a gym
+  log: a note on how it went, and a way to say what it was about.
+  - A session's existing (previously under-used) `note` field is now
+    a real short journal entry — labeled "Notes" everywhere it's
+    edited, hinted with "How did it go? What did you do? What's
+    next?" — rather than a one-line "what did you work on?" caption.
+  - **Session tags (S)** — a new, separate-from-project-categories
+    tag vocabulary (e.g. "Physics", "Majorana", "Coding", "Studying",
+    "Reading", "Literature review" — seeded as defaults, freely
+    add/rename/delete your own from Settings > Session tags, same
+    add/rename/delete pattern as project categories). A session can
+    carry several tags at once (many-to-many), picked from a chip
+    grid with an inline "add a new tag" field (`TagPicker`, shared
+    across every place tags are edited) — no need to leave the dialog
+    to define a new one on the spot. Tags now render as `#tag` chips
+    everywhere they're shown (the picker's own chips, the session
+    list on a project's detail page, the manage-tags screen) so
+    they read unambiguously as tags rather than plain words — the
+    hashtag prefix is purely cosmetic, stored tag names don't carry
+    it themselves.
+  - **A real "End session" step (S)** — tapping "End & record"
+    (whether from a project's own detail page or the active-session
+    banner on the Projects list) no longer stops and records the
+    timer instantly. It opens a dialog showing the elapsed duration
+    (as editable hours/minutes fields — see below), the notes field,
+    and the tag picker; nothing is recorded until "Record" is tapped,
+    and "Cancel" leaves the session running/paused exactly as it was.
+    A session under a minute at the moment the dialog opens gets a
+    small flagged hint ("only a few seconds — adjust the duration
+    above if that's not right") without blocking anything.
+  - ✅ **Cancel an in-progress session (S)** — Done: alongside pause/
+    resume/end, a running or paused session can now be cancelled
+    outright — discarded with nothing recorded, rather than the only
+    way out being to end it (which always saved something, even a
+    near-zero duration). Available from both the active-session
+    banner on the Projects list and the project's own detail page,
+    behind its own confirm dialog so it isn't one accidental tap away
+    from losing tracked time.
+  - **Editable duration when ending (S)** — the same dialog's
+    hours/minutes fields aren't just a display: forgot to end a
+    session hours ago? Lower the duration before recording and only
+    the time you actually worked gets saved. Implemented by folding
+    the difference into the entry's existing `paused_seconds`
+    bookkeeping (the same mechanism pause/resume already uses)
+    instead of rewriting `started_at`, so the entry's true start time
+    is preserved even after a correction.
+  - Logging a past session by hand, and editing an already-recorded
+    one (`add_manual_entry_dialog.dart`, used for both), gained the
+    same notes-hint wording and the same tag picker, pre-filled with
+    that entry's current tags when editing.
+  - The sessions list on a project's detail page now shows each
+    entry's tags as small chips under its note. Deleting a session
+    (with Undo) and restoring it now carries its tags along too,
+    rather than silently losing them.
+  - Schema bump to version 10: new `session_tags` and
+    `time_entry_tags` (many-to-many join) tables.
+- ✅ **Last-7-days habit overview (S)** — Done, then relocated and
+  split based on feedback: the aggregate bar strip (one bar per day,
+  today and the six days before it, showing what percentage of active
+  habits were completed) no longer lives on the Habits main page — it
+  moved into Insights → Habits, at the top of that tab, since the main
+  page is for quick daily action, not a dashboard. In its place, each
+  individual habit's own detail page now has its own "Last 7 days"
+  strip showing that specific habit's actual daily values (done/not
+  done for boolean habits; the amount logged for count/duration
+  habits) — a different, more useful view than the aggregate one,
+  and shown for every habit type (unlike the weekday-average chart,
+  which only applies to count/duration habits). Also fixed a 2px
+  render-overflow ("bottom overflowed by 2.0 pixels") in the shared
+  bar-strip widget these charts are built on — a `SizedBox` wrapper
+  was sized a couple pixels shorter than its content.
 - **"Year in review" screen (L)** — once you're a year in, a Spotify-
   Wrapped-style summary: total hours tracked, best streaks, most-worked
   project, etc. High payoff, but only worth it once there's real history.
@@ -163,6 +280,26 @@ building views on top:
   came up directly): a project session can now be begun, paused, resumed,
   and ended & recorded, instead of only start/stop. Paused time doesn't
   count toward the recorded duration.
+- ✅ **One "Start session" flow instead of per-card timers (M)** — Done,
+  redesigned based on feedback that a play/pause/stop button on every
+  row of the Projects list "felt like a stopwatch" rather than a study
+  log. The list is now a plain summary (name, tags, total time); there
+  is a single "Start a session" entry point (a button on the Projects
+  screen, or "Begin session" on a project's own detail page) that asks
+  which project and how to time it — a countdown (default 25 minutes,
+  adjustable in 5-minute steps, Pomodoro-style) or the original
+  open-ended count-up timer. While one is active, a banner at the top
+  of the Projects list (or the detail page, if you're on it) shows the
+  running project, remaining/elapsed time, and pause/end controls —
+  one place to manage the one session that can ever be active, instead
+  of controls duplicated on every card. Each start is still its own
+  separate session/log, same as before.
+- ✅ **Per-project weekly/monthly time overview (S)** — Done: a
+  project's detail page now shows "This week" / "This month" totals
+  plus two small charts underneath — a 7-day bar strip (this
+  project's minutes per day, last 7 days) and a monthly bubble
+  calendar (same Google-Fit-style circles as the Insights view, but
+  scoped to just this one project, tinted in its own color).
 - ✅ **Idle detection (L)** — Done, scoped down from the original idea:
   if a project timer is left running while the app sits in the
   background for 15+ minutes, returning to the app prompts "Still
@@ -192,7 +329,10 @@ building views on top:
   rather than a second parallel to-do system. The app-bar badge itself
   was refined further: it now counts only to-dos actually due *today*
   (not the full pending total), so an empty badge really does mean
-  "nothing on for today," not just "nothing due-or-overdue."
+  "nothing on for today," not just "nothing due-or-overdue." Renamed
+  from "To-dos" to "Tasks" throughout (page title, app-bar tooltip,
+  the checklist's own heading and add-row hint) — same feature, just
+  clearer wording.
 - **Calendar view of tracked time (M)** — see which project you worked on
   each day, at a glance, across projects. Not started.
 - ✅ **Visual parent/child indentation on the Projects list (S)** — Done:
@@ -202,6 +342,117 @@ building views on top:
   status-filtered view (a project whose parent got filtered out just
   falls back to top-level for display). Drag-to-reorder still works
   against this grouped order.
+- **Clearer parent/child relationship, round 2 (S)** — Feedback that
+  indentation alone still "felt like a stopwatch"-style flat list, not
+  a real hierarchy. Five options were offered; tried in order:
+  - ❌ **Branch connector icon** — Tried alongside color inheritance,
+    then reverted on feedback ("didn't like it"): a small "↳" icon in
+    front of a child's name. Not brought back.
+  - ✅ **Parent-color inheritance (S)** — Reconsidered after the
+    grouped card and collapsible groups landed: a new sub-project's
+    color now defaults to a lightened tint of its parent's (shown as
+    "Suggested from parent" next to a swatch preview, overridable by
+    picking your own color as always). Only applies to new projects,
+    and only before the color picker has been touched — editing an
+    existing project's parent never silently recolors it.
+  - ✅ **Grouped card (S)** — Done, current approach: a parent and all
+    its children are now drawn as one shared rounded container
+    (tinted with the top-level project's own color, a thin colored
+    border, a divider between rows) instead of separate individual
+    cards — so the family reads as one visual unit on the Projects
+    list. A project with no children still renders as its own plain
+    card, unchanged. Drag-to-reorder still works per-row underneath.
+  - ✅ **Collapsible parent groups (S)** — Done, layered on top of the
+    grouped card above: a family-root row now has an expand/collapse
+    chevron in place of the usual "tap to open" arrow. Collapsing a
+    parent hides its children (and grandchildren) entirely and
+    appends a rolled-up summary to the parent's own row — "N
+    sub-projects · Xh Ym more" — computed recursively so nested
+    sub-projects are still counted even though only the top row
+    shows. Tapping the row itself (not the chevron) still opens the
+    project as normal; collapse state is a plain in-memory UI toggle,
+    not persisted. Drag-to-reorder is unaffected — collapsed children
+    stay in the list as zero-height placeholders rather than being
+    filtered out, so drag indices never need remapping.
+- **Status-hinting project icon (S)** — Feedback that the same folder
+  icon on every project row didn't communicate anything.
+  - ❌ **Swap the icon itself** — First tried: the avatar's whole icon
+    swapped based on `ProjectStatus` (folder/pause-circle/check-circle).
+    Rejected on feedback ("didn't like it").
+  - ✅ **Category icon + status badge overlay (S)** — Current approach,
+    replacing the swap above entirely: a `ProjectCategory` now carries
+    its own icon, chosen from a wide picker (~35 icons) shown when
+    creating *or* editing a category from Settings > Project
+    categories. A project's avatar shows its category's icon (falling
+    back to a generic folder when it has none) instead of a
+    status-derived one, with a small round badge layered in the
+    avatar's corner hinting at status instead — a play triangle for
+    ongoing, a pause for on hold, a check for completed. A
+    running/paused session gets its own highlight — a colored ring
+    around the whole avatar — layered on top of that, rather than
+    overriding the icon outright. New shared `ProjectAvatar` widget
+    (`widgets/project_card.dart`) draws this everywhere a project's
+    avatar shows: the main Projects list, a project's own
+    "Sub-projects" section, and (as icons, not the avatar) the "Type"
+    dropdown on the add/edit project screen now shows each category's
+    icon next to its name. Schema bump to version 9
+    (`project_categories.icon_code_point`); the five seeded default
+    categories (Course, Research, Side project, Personal, Work) got a
+    matching icon backfilled automatically for existing installs.
+  - ✅ **Decluttered the project card (S)** — Done, once the icon/badge
+    above already carried category and status: the category-name text
+    chip and the on-hold/completed status-label chip were dropped from
+    each row on the Projects list, since the avatar's icon and small
+    status badge already say the same thing without spelling it out
+    in words too.
+- ✅ **A session in progress notification (S)** — Done: while a timer is
+  running (or paused), a persistent system notification shows the
+  project name and a live minute:second clock, using Android's own
+  notification chronometer (`usesChronometer`) so the count ticks
+  forward on its own without the app reposting it every second or
+  needing a foreground service. Frozen (not ticking) while paused, and
+  cancelled once nothing is active. Best-effort — a notification-plugin
+  hiccup never takes down the app itself.
+- ✅ **A parent project's totals include its sub-projects' time (M)** —
+  Done: "a child is a sub-project of a main project at the end of the
+  day" — a parent's total/weekly/monthly/last-7-days/monthly-calendar
+  figures now fold in every descendant's tracked time automatically,
+  not just what was logged directly on the parent itself. The one
+  app-wide grand total (used by the cross-project daily/monthly
+  totals) deliberately stays a plain per-project sum so nesting
+  projects under a parent never inflates that figure by double-counting
+  a child's time under both itself and its parent. The collapsed
+  family-row summary on the Projects list ("N sub-projects") dropped
+  its "· Xh more" suffix, since the parent row's own total already
+  includes that time now — the suffix would have implied *extra* time
+  beyond what's shown.
+- ✅ **Fixed: losing the "suggested from parent" color after a misclick
+  (S)** — Done: previously, tapping any other swatch by mistake on the
+  add/edit project screen permanently hid the parent-tint suggestion
+  for that session (it was gated on a one-way "have you touched a
+  swatch yet" flag). The suggested tint is now its own selectable
+  swatch (marked with a small star) that stays available in the color
+  picker for as long as a parent is set, so it can always be tapped
+  back to, misclick or not.
+- ✅ **Move a project to a different parent from the Projects list (S)**
+  — Done, after evaluating true drag-and-drop: a small "move" icon on
+  each project card opens a bottom sheet to pick a new parent (or
+  "No parent" to make it top-level) in one tap. A real long-press-drag-
+  onto-another-project gesture was considered first, but the list
+  already uses long-press-drag for its own drag-to-reorder — layering
+  a second "drop onto a project" gesture on the exact same long-press-
+  drag on the exact same rows would fight that existing, working
+  interaction rather than complementing it, with no reliable way to
+  test the result here. This gets to the same outcome (re-parent a
+  project without opening its full edit screen) without touching that
+  gesture at all.
+- ✅ **A short title for each session (S)** — Done: "each study session
+  is like a post" — ending a session (or logging/editing one manually)
+  now asks for a short required title first, shown as the session's
+  main line wherever sessions are listed (the notes field, still
+  optional, is the body underneath). Schema bump to version 11
+  (`time_entries.title`); sessions recorded before this update just
+  show their timestamp as before, exactly as they did previously.
 
 ## 5. App-wide / quality-of-life
 
@@ -225,7 +476,12 @@ building views on top:
 - ✅ **Settings screen (M)** — Done: covers 12h/24h time, first day of the
   week, default habit frequency, and the recap notification schedule,
   alongside the theme picker. Manual dark-mode override is covered by
-  the theme picker (System/Light/Dark, plus a few fixed themes).
+  the theme picker (System/Light/Dark, plus a few fixed themes). A
+  "Sessions" section was added this round: a default countdown length
+  (5-minute steps, same range as the dialog itself) that pre-fills the
+  "Start a session" dialog's countdown field — still freely adjustable
+  per session, just a different starting point than the old hardcoded
+  25 minutes.
 - ✅ **First day of week setting (S)** — Done: Monday or Sunday, in
   Settings → Week. Feeds `StreakCalculator`'s and `ProjectProvider`'s
   week-boundary math (weekly habit streaks, weekly time goals, and
@@ -259,9 +515,22 @@ building views on top:
   blind through a chat.
 - **App lock (M)** — PIN or fingerprint lock, since this is personal
   tracking data (workouts, study habits, hours worked). Not started.
-- **Turkish localization (M)** — `flutter_localizations` + an `.arb` file;
-  worth it if this is meant for daily use rather than just English
-  practice. Not started.
+- ✅ **Turkish localization (M)** — Done: the whole app, not just a
+  language setting, translates into Turkish. Settings → Language offers
+  English/Turkish; the choice is threaded through a hand-written
+  `AppLocalizations` (no codegen — a plain Dart class with one
+  getter/method per string, `context.l10n` accessor), used across every
+  screen, widget, notification, and even the Android home-screen-widget
+  and background-notification code paths that run without a
+  `BuildContext` (they read the saved language straight from
+  `SharedPreferences`). Dates (`DateFormat`) pick up the active locale
+  everywhere too, and grammatically sensitive strings (durations, "N of
+  M this week," overdue-task labels) are built as whole sentences per
+  language rather than concatenated fragments, to avoid Turkish
+  word-order/agreement issues. A couple of things were deliberately left
+  in English on both languages: the app's own name/brand ("Habits") and
+  the two native Android widget-provider class names, which aren't
+  user-facing text.
 
 ## 6. Multi-person / shared use
 
@@ -306,7 +575,11 @@ logs and sessions, drag-to-reorder, a Settings screen (time format, first
 day of week, default habit frequency, recap notifications), a yearly
 heatmap per habit, cross-habit/cross-project dashboards (the "Insights"
 tab), a shareable streak card, daily/weekly recap notifications, milestone
-badges, unarchive UI, and local backup/restore.
+badges, unarchive UI, local backup/restore, a cancel option for an
+in-progress session, hashtag-styled session tags, a full Turkish
+translation of the app (Settings → Language), a persistent
+session-in-progress notification, parent-inclusive project time
+totals, and a required session title.
 
 The Android home-screen widgets were attempted and then reverted (see the
 note above) — not currently part of the app.
@@ -319,13 +592,12 @@ Next, roughly in order of "cheapest and most immediately useful":
    worth building around the same time.
 3. "Year in review" screen, once there's a real year of history to
    summarize.
-4. In-progress-timer notification (a persistent "tracking time on X"
-   notification while a session runs).
-5. Revisit the Android home-screen widgets, scoped smaller and built with
+4. Revisit the Android home-screen widgets, scoped smaller and built with
    a tighter compile/inspect loop than a chat can offer.
 
-The in-progress-timer notification was left out of this pass since a
-*persistent* (non-dismissible, always up-to-date) notification needs a
-foreground service, which is a heavier, more failure-prone piece of
-native Android than the recap notifications or the widgets — worth its
-own focused pass rather than bundling it in.
+The in-progress-timer notification (previously listed here as not
+started) is now done — see the "A session in progress notification"
+item above. It turned out not to need a foreground service after all:
+Android's own notification chronometer field ticks the displayed time
+forward on its own once the notification is posted, so a plain posted
+system notification was enough.

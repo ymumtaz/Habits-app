@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/habit_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../models/habit.dart';
 import '../widgets/year_heatmap.dart';
 
@@ -21,19 +22,20 @@ class YearHeatmapScreen extends StatelessWidget {
     );
     final completedDates = provider.doneDatesFor(current);
     final total = completedDates.length;
+    final t = context.l10n;
 
     return Scaffold(
-      appBar: AppBar(title: Text('${current.name} — yearly overview')),
+      appBar: AppBar(title: Text(t.yearlyOverviewTitle(current.name))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'Last 53 weeks',
+            t.last53Weeks,
             style: Theme.of(context).textTheme.titleSmall,
           ),
           const SizedBox(height: 4),
           Text(
-            '$total day${total == 1 ? '' : 's'} completed in this window',
+            t.daysCompletedInWindow(total),
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
@@ -45,13 +47,13 @@ class YearHeatmapScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _LegendSwatch(color: current.color.withValues(alpha: 0.08)),
+              _LegendSwatch(color: current.color.withOpacity(0.08)),
               const SizedBox(width: 4),
-              const Text('Not done', style: TextStyle(fontSize: 11)),
+              Text(t.legendNotDone, style: const TextStyle(fontSize: 11)),
               const SizedBox(width: 16),
               _LegendSwatch(color: current.color),
               const SizedBox(width: 4),
-              const Text('Done', style: TextStyle(fontSize: 11)),
+              Text(t.legendDone, style: const TextStyle(fontSize: 11)),
             ],
           ),
         ],

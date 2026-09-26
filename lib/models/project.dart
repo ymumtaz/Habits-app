@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+
 /// Where a project currently stands. Independent of [Project.archived]
 /// — archiving hides a project from the main list entirely, while
 /// status is just a visible label on an otherwise-active project (a
@@ -15,10 +17,20 @@ ProjectStatus projectStatusFromString(String value) {
 }
 
 extension ProjectStatusLabel on ProjectStatus {
-  String get label => switch (this) {
-        ProjectStatus.ongoing => 'Ongoing',
-        ProjectStatus.onHold => 'On hold',
-        ProjectStatus.completed => 'Completed',
+  String label(AppLocalizations t) => switch (this) {
+        ProjectStatus.ongoing => t.statusOngoing,
+        ProjectStatus.onHold => t.statusOnHold,
+        ProjectStatus.completed => t.statusCompleted,
+      };
+
+  /// "No ongoing projects." style message for an empty filtered list —
+  /// a full localized sentence per status rather than composing one
+  /// from [label], since "no X projects" doesn't translate by simply
+  /// lowercasing and concatenating in every language.
+  String emptyFilterMessage(AppLocalizations t) => switch (this) {
+        ProjectStatus.ongoing => t.noOngoingProjects,
+        ProjectStatus.onHold => t.noOnHoldProjects,
+        ProjectStatus.completed => t.noCompletedProjects,
       };
 }
 

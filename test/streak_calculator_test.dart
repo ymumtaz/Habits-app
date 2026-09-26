@@ -22,7 +22,9 @@ Habit _habit({
   int targetPerWeek = 7,
   HabitType type = HabitType.boolean,
   int? dailyTarget,
+  TargetMode targetMode = TargetMode.atLeast,
   int tolerancePerMonth = 0,
+  DateTime? createdAt,
 }) {
   return Habit(
     id: 1,
@@ -31,8 +33,9 @@ Habit _habit({
     targetPerWeek: targetPerWeek,
     type: type,
     dailyTarget: dailyTarget,
+    targetMode: targetMode,
     tolerancePerMonth: tolerancePerMonth,
-    createdAt: DateTime(2024, 1, 1),
+    createdAt: createdAt ?? DateTime(2024, 1, 1),
   );
 }
 
@@ -118,6 +121,19 @@ void main() {
       final result = StreakCalculator.compute(_habit(), logs);
       expect(result.currentStreak, 1);
     });
+
+    test('backfilling several past days counts them all toward the '
+        'streak, even if they predate when the habit was added to the '
+        'app', () {
+      // The habit was only just added today, but its history was
+      // backfilled for the past several days via the calendar -- the
+      // streak should reflect the actual logged days, not stop short
+      // just because they're "before" the habit's createdAt.
+      final habit = _habit(createdAt: DateTime.now());
+      final logs = [for (var i = 0; i < 6; i++) _logDaysAgo(i)];
+      final result = StreakCalculator.compute(habit, logs);
+      expect(result.currentStreak, 6);
+    });
   });
 
   group('weekly habits (X times per week)', () {
@@ -142,18 +158,29 @@ void main() {
         frequency: HabitFrequency.weekly,
         targetPerWeek: 3,
       );
-      // Only 1 completion this week, but a full 8-day-old run hit
-      // target the two weeks before that (well outside this week).
+      // Only 1 completion this week (today), but the *previous*
+      // calendar week hit target with 3. Anchored to fixed weeks
+      // (like the monthly-tolerance tests below) rather than "N days
+      // ago": a fixed offset in days can land in either the current or
+      // previous week depending on what day the suite happens to run
+      // on, which made this test flaky.
+      final now = DateTime.now();
+      final thisMonday = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: now.weekday - DateTime.monday));
+      final lastMonday = thisMonday.subtract(const Duration(days: 7));
       final logs = [
-        _logDaysAgo(0),
-        _logDaysAgo(10),
-        _logDaysAgo(11),
-        _logDaysAgo(12),
+        HabitLog(habitId: 1, date: now, createdAt: now),
+        for (var i = 0; i < 3; i++)
+          HabitLog(
+            habitId: 1,
+            date: lastMonday.add(Duration(days: i)),
+            createdAt: lastMonday,
+          ),
       ];
-      final result = StreakCalculator.compute(habit, logs);
+      final result = StreakCalculator.compute(habit, logs, now: now);
       expect(result.completionsThisPeriod, 1);
       // This week hasn't hit target, so it isn't part of the current
-      // streak — best streak still reflects the earlier run.
+      // streak — best streak still reflects last week's run.
       expect(result.bestStreak, greaterThanOrEqualTo(1));
     });
   });
@@ -205,7 +232,7 @@ void main() {
     // week starts Monday 2024-06-10. Helper builds a log for a given
     // number of *weeks* before that current week, on the Monday of
     // that week — enough to hit any target up to 7 via [count].
-    List<HabitLog> weekOf(int weeksBefore, int count) {
+    List<HabitLog> _weekOf(int weeksBefore, int count) {
       final monday =
           DateTime(2024, 6, 10).subtract(Duration(days: weeksBefore * 7));
       return [
@@ -235,9 +262,9 @@ void main() {
       // exactly June's 2-day budget, so it's tolerated. Week 2 hits
       // target again, drawing on May's separate budget.
       final logs = [
-        ...weekOf(0, 3),
-        ...weekOf(1, 1),
-        ...weekOf(2, 3),
+        ..._weekOf(0, 3),
+        ..._weekOf(1, 1),
+        ..._weekOf(2, 3),
       ];
       final result = StreakCalculator.compute(habit, logs, now: _fixedNow);
       // Week 1's shortfall doesn't break the walk, but only weeks 0 and
@@ -255,9 +282,9 @@ void main() {
       // Week 1 falls 2 days short, but June's budget is only 1 -> the
       // walk stops there, so only week 0 counts.
       final logs = [
-        ...weekOf(0, 3),
-        ...weekOf(1, 1),
-        ...weekOf(2, 3),
+        ..._weekOf(0, 3),
+        ..._weekOf(1, 1),
+        ..._weekOf(2, 3),
       ];
       final result = StreakCalculator.compute(habit, logs, now: _fixedNow);
       expect(result.currentStreak, 1);
@@ -270,9 +297,9 @@ void main() {
         targetPerWeek: 3,
       );
       final logs = [
-        ...weekOf(0, 3),
-        ...weekOf(1, 2), // just 1 day short
-        ...weekOf(2, 3),
+        ..._weekOf(0, 3),
+        ..._weekOf(1, 2), // just 1 day short
+        ..._weekOf(2, 3),
       ];
       final result = StreakCalculator.compute(habit, logs, now: _fixedNow);
       expect(result.currentStreak, 1);
@@ -359,21 +386,64 @@ void main() {
     });
   });
 
-  group('StreakResult.score', () {
-    test('weights current streak above best streak', () {
-      const a = StreakResult(
-        currentStreak: 5,
-        bestStreak: 0,
-        completionsThisPeriod: 5,
-        completedToday: true,
+  group('consistency score', () {
+    test('no logs -> score is 0', () {
+      final result = StreakCalculator.compute(_habit(), []);
+      expect(result.consistencyScore, 0);
+    });
+
+    test('hit daily for the last two weeks settles around 90', () {
+      final habit = _habit(createdAt: _fixedNow.subtract(const Duration(days: 40)));
+      final logs = [for (var i = 0; i < 14; i++) _fixedLog(i)];
+      final result = StreakCalculator.compute(habit, logs, now: _fixedNow);
+      expect(result.consistencyScore, inInclusiveRange(85, 95));
+    });
+
+    test('a long, consistent history scores higher than a fresh one '
+        'with the same recent behavior', () {
+      final freshHabit =
+          _habit(createdAt: _fixedNow.subtract(const Duration(days: 13)));
+      final oldHabit =
+          _habit(createdAt: _fixedNow.subtract(const Duration(days: 300)));
+      final recentLogs = [for (var i = 0; i < 14; i++) _fixedLog(i)];
+      final longLogs = [for (var i = 0; i < 300; i++) _fixedLog(i)];
+
+      final fresh = StreakCalculator.compute(freshHabit, recentLogs, now: _fixedNow);
+      final established = StreakCalculator.compute(oldHabit, longLogs, now: _fixedNow);
+      expect(established.consistencyScore, greaterThan(fresh.consistencyScore));
+    });
+
+    test('falling off after a long good run decays gradually, not to '
+        'zero immediately', () {
+      final habit = _habit(createdAt: _fixedNow.subtract(const Duration(days: 300)));
+      // Done every day for the last 300 days, then missed just today.
+      final logs = [for (var i = 1; i <= 300; i++) _fixedLog(i)];
+      final result = StreakCalculator.compute(habit, logs, now: _fixedNow);
+      expect(result.consistencyScore, greaterThan(60));
+    });
+
+    test('a single good day-one entry does not jump straight to 90', () {
+      // This is the exact behavior that was wrong before: a fresh habit
+      // logged once, today, should score low -- it climbs to 90 only
+      // after a couple of weeks of real consistency, not on day one.
+      final habit = _habit(createdAt: _fixedNow);
+      final result =
+          StreakCalculator.compute(habit, [_fixedLog(0)], now: _fixedNow);
+      expect(result.consistencyScore, lessThan(30));
+    });
+
+    test('an "at most" habit scores well when kept under its limit', () {
+      final habit = _habit(
+        type: HabitType.duration,
+        dailyTarget: 60,
+        targetMode: TargetMode.atMost,
+        createdAt: _fixedNow.subtract(const Duration(days: 20)),
       );
-      const b = StreakResult(
-        currentStreak: 0,
-        bestStreak: 5,
-        completionsThisPeriod: 0,
-        completedToday: false,
-      );
-      expect(a.score, greaterThan(b.score));
+      final logs = [
+        for (var i = 0; i < 14; i++) _fixedLog(i, amount: 45),
+      ];
+      final result = StreakCalculator.compute(habit, logs, now: _fixedNow);
+      expect(result.consistencyScore, greaterThan(85));
     });
   });
 }

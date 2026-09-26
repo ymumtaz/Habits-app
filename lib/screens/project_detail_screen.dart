@@ -4,11 +4,17 @@ import 'package:provider/provider.dart';
 
 import '../data/project_provider.dart';
 import '../data/settings_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../models/project.dart';
 import '../models/time_entry.dart';
 import '../utils/duration_format.dart';
 import '../widgets/add_manual_entry_dialog.dart';
 import '../widgets/confirm_dialog.dart';
+import '../widgets/daily_bar_strip.dart';
+import '../widgets/end_session_dialog.dart';
+import '../widgets/monthly_bubble_chart.dart';
+import '../widgets/project_card.dart';
+import '../widgets/start_session_dialog.dart';
 import '../widgets/task_checklist.dart';
 import '../widgets/undo_snackbar.dart';
 import 'add_edit_project_screen.dart';
@@ -30,13 +36,20 @@ class ProjectDetailScreen extends StatelessWidget {
     final total = provider.totalDurationFor(current);
     final entries = provider.entriesFor(current.id!);
     final use24Hour = context.watch<SettingsProvider>().use24HourTime;
-    final formatter =
-        DateFormat(use24Hour ? 'EEE, MMM d · HH:mm' : 'EEE, MMM d · h:mm a');
+    final formatter = DateFormat(
+      use24Hour ? 'EEE, MMM d · HH:mm' : 'EEE, MMM d · h:mm a',
+      context.l10n.locale.languageCode,
+    );
     final goal = current.goalMinutesPerWeek;
     final weeklyMinutes = provider.weeklyDurationFor(current).inMinutes;
+    final monthly = provider.monthlyDurationFor(current);
     final categoryName = provider.categoryFor(current)?.name;
     final parent = provider.parentOf(current);
     final children = provider.childrenOf(current);
+    final activeRemaining = isActive ? provider.activeEntry?.remaining : null;
+    final now = DateTime.now();
+    final (monthGridStart, monthGridEnd) = MonthlyBubbleChart.gridRange(now);
+    final t = context.l10n;
 
     return Scaffold(
       appBar: AppBar(
@@ -58,18 +71,17 @@ class ProjectDetailScreen extends StatelessWidget {
               } else if (value == 'delete') {
                 final confirmed = await confirmDelete(
                   context,
-                  title: 'Delete "${current.name}"?',
-                  message: 'This permanently deletes the project and all of '
-                      'its tracked time sessions. This can\'t be undone.',
+                  title: t.deleteProjectTitle(current.name),
+                  message: t.deleteProjectMessage,
                 );
                 if (!confirmed) return;
                 await provider.deleteProject(current);
                 if (context.mounted) Navigator.of(context).pop();
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'archive', child: Text('Archive')),
-              PopupMenuItem(value: 'delete', child: Text('Delete')),
+            itemBuilder: (context) => [
+              PopupMenuItem(value: 'archive', child: Text(t.archiveMenuItem)),
+              PopupMenuItem(value: 'delete', child: Text(t.deleteMenuItem)),
             ],
           ),
         ],
@@ -81,13 +93,19 @@ class ProjectDetailScreen extends StatelessWidget {
             child: Column(
               children: [
                 Text(
-                  formatDuration(total),
+                  formatDuration(total, t),
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 Text(
-                  isRunning
-                      ? 'Session running'
-                      : (isPaused ? 'Session paused' : 'Total time tracked'),
+                  !isActive
+                      ? t.totalTimeTracked
+                      : activeRemaining == null
+                          ? (isRunning ? t.sessionRunning : t.sessionPaused)
+                          : activeRemaining.isNegative
+                              ? '${isRunning ? t.runningLabel : t.pausedLabel} · '
+                                  '+${formatDurationClock(activeRemaining.abs())} ${t.timeOverSuffix}'
+                              : '${isRunning ? t.runningLabel : t.pausedLabel} · '
+                                  '${formatDurationClock(activeRemaining)} ${t.timeLeftSuffix}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: isActive ? current.color : null,
                         fontWeight:
@@ -121,7 +139,7 @@ class ProjectDetailScreen extends StatelessWidget {
                   if (parent != null)
                     ActionChip(
                       avatar: const Icon(Icons.subdirectory_arrow_right, size: 16),
-                      label: Text('Part of ${parent.name}'),
+                      label: Text(t.partOf(parent.name)),
                       visualDensity: VisualDensity.compact,
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute(
@@ -136,13 +154,13 @@ class ProjectDetailScreen extends StatelessWidget {
           const SizedBox(height: 16),
           Center(
             child: SegmentedButton<ProjectStatus>(
-              segments: const [
+              segments: [
                 ButtonSegment(
-                    value: ProjectStatus.ongoing, label: Text('Ongoing')),
+                    value: ProjectStatus.ongoing, label: Text(t.statusOngoing)),
                 ButtonSegment(
-                    value: ProjectStatus.onHold, label: Text('On hold')),
+                    value: ProjectStatus.onHold, label: Text(t.statusOnHold)),
                 ButtonSegment(
-                    value: ProjectStatus.completed, label: Text('Completed')),
+                    value: ProjectStatus.completed, label: Text(t.statusCompleted)),
               ],
               selected: {current.status},
               onSelectionChanged: (selected) =>
@@ -152,9 +170,21 @@ class ProjectDetailScreen extends StatelessWidget {
           const SizedBox(height: 24),
           if (!isActive)
             FilledButton.icon(
-              onPressed: () => provider.beginSession(current),
+              onPressed: () async {
+                final choice = await showStartSessionDialog(
+                  context,
+                  projects: provider.projects,
+                  initialProject: current,
+                );
+                if (choice != null) {
+                  await provider.beginSession(
+                    choice.project,
+                    targetMinutes: choice.targetMinutes,
+                  );
+                }
+              },
               icon: const Icon(Icons.play_arrow),
-              label: const Text('Begin session'),
+              label: Text(t.beginSession),
             )
           else
             Row(
@@ -165,24 +195,52 @@ class ProjectDetailScreen extends StatelessWidget {
                         ? provider.pauseActiveSession()
                         : provider.resumeActiveSession(),
                     icon: Icon(isRunning ? Icons.pause : Icons.play_arrow),
-                    label: Text(isRunning ? 'Pause' : 'Resume'),
+                    label: Text(isRunning ? t.pauseTooltip : t.resumeTooltip),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: () => provider.endActiveSession(),
+                    onPressed: () async {
+                      final active = provider.activeEntry;
+                      if (active == null) return;
+                      final result = await showEndSessionDialog(
+                        context,
+                        activeEntry: active,
+                      );
+                      if (result != null) {
+                        await provider.endActiveSession(
+                          duration: result.duration,
+                          title: result.title,
+                          note: result.note,
+                          tagIds: result.tagIds,
+                        );
+                      }
+                    },
                     icon: const Icon(Icons.stop),
-                    label: const Text('End & record'),
+                    label: Text(t.endAndRecordTooltip),
                   ),
                 ),
               ],
             ),
+          if (isActive) ...[
+            const SizedBox(height: 4),
+            Center(
+              child: TextButton.icon(
+                onPressed: () =>
+                    _cancelActiveSessionWithConfirm(context, provider),
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: Text(t.sessionCancelTooltip),
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ),
+          ],
           if (!isActive && provider.isAnySessionActive) ...[
             const SizedBox(height: 8),
             Text(
-              'Beginning this will end the session running on another '
-              'project.',
+              t.beginningEndsOtherSession,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -196,12 +254,63 @@ class ProjectDetailScreen extends StatelessWidget {
                   current,
                   startedAt: result.startedAt,
                   duration: result.duration,
+                  title: result.title,
                   note: result.note,
+                  tagIds: result.tagIds,
                 );
               }
             },
             icon: const Icon(Icons.history_edu_outlined),
-            label: const Text('Add a past session'),
+            label: Text(t.addAPastSession),
+          ),
+          const SizedBox(height: 28),
+          Text(t.timeOverview, style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: _OverviewStat(
+                  label: t.thisWeek,
+                  value: formatDurationCoarse(Duration(minutes: weeklyMinutes), t),
+                ),
+              ),
+              Expanded(
+                child: _OverviewStat(
+                  label: t.thisMonth,
+                  value: formatDurationCoarse(monthly, t),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          DailyBarStrip(
+            days: [
+              for (var i = 6; i >= 0; i--)
+                DateTime(now.year, now.month, now.day).subtract(Duration(days: i)),
+            ],
+            values: [
+              for (final d in provider.last7DaysDurationsFor(current))
+                d.inMinutes.toDouble(),
+            ],
+            maxValue: provider
+                .last7DaysDurationsFor(current)
+                .fold<int>(0, (max, d) => d.inMinutes > max ? d.inMinutes : max)
+                .clamp(1, 1 << 30)
+                .toDouble(),
+            color: current.color,
+            valueLabelBuilder: (v) => formatDurationCoarse(Duration(minutes: v.round()), t),
+          ),
+          const SizedBox(height: 20),
+          MonthlyBubbleChart(
+            month: now,
+            valuesByDay: {
+              for (final e in provider
+                  .dailyDurationsForRange(current, monthGridStart, monthGridEnd)
+                  .entries)
+                e.key: e.value.inMinutes.toDouble(),
+            },
+            color: current.color,
+            valueLabelBuilder: (v) => formatDurationCoarse(Duration(minutes: v.round()), t),
           ),
           const SizedBox(height: 24),
           TaskChecklist(
@@ -212,15 +321,20 @@ class ProjectDetailScreen extends StatelessWidget {
           ),
           if (children.isNotEmpty) ...[
             const SizedBox(height: 24),
-            Text('Sub-projects', style: Theme.of(context).textTheme.titleSmall),
+            Text(t.subProjects, style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
             for (final child in children)
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.folder_outlined, color: child.color),
+                leading: ProjectAvatar(
+                  project: child,
+                  categoryIcon: provider.categoryFor(child)?.icon,
+                  isActive: provider.isActive(child),
+                  radius: 16,
+                ),
                 title: Text(child.name),
-                trailing: Text(formatDuration(provider.totalDurationFor(child))),
+                trailing: Text(formatDuration(provider.totalDurationFor(child), t)),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => ProjectDetailScreen(project: child),
@@ -229,12 +343,12 @@ class ProjectDetailScreen extends StatelessWidget {
               ),
           ],
           const SizedBox(height: 24),
-          Text('Sessions', style: Theme.of(context).textTheme.titleSmall),
+          Text(t.sessions, style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
           if (entries.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: Text('No sessions logged yet.'),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text(t.noSessionsLoggedYet),
             )
           else
             for (final entry in entries.take(50))
@@ -249,22 +363,27 @@ class ProjectDetailScreen extends StatelessWidget {
                           : Icons.check_circle_outline),
                   color: entry.isActive ? current.color : null,
                 ),
-                title: Text(formatter.format(entry.startedAt)),
-                subtitle: entry.note != null && entry.note!.isNotEmpty
-                    ? Text(entry.note!)
-                    : null,
+                title: Text(
+                  (entry.title != null && entry.title!.isNotEmpty)
+                      ? entry.title!
+                      : formatter.format(entry.startedAt),
+                  style: (entry.title != null && entry.title!.isNotEmpty)
+                      ? const TextStyle(fontWeight: FontWeight.w600)
+                      : null,
+                ),
+                subtitle: _entrySubtitle(context, provider, entry, formatter),
                 onTap: entry.isActive
                     ? null
                     : () => _editEntry(context, provider, entry),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(formatDuration(entry.duration)),
+                    Text(formatDuration(entry.duration, t)),
                     if (!entry.isActive)
                       IconButton(
                         iconSize: 18,
                         icon: const Icon(Icons.close),
-                        tooltip: 'Delete session',
+                        tooltip: t.deleteSessionTooltip,
                         onPressed: () =>
                             _deleteEntryWithConfirm(context, provider, entry),
                       ),
@@ -277,44 +396,154 @@ class ProjectDetailScreen extends StatelessWidget {
   }
 }
 
+/// The note and tag chips shown under a session's start time — null
+/// when there's neither, so the row stays single-line.
+Widget? _entrySubtitle(
+  BuildContext context,
+  ProjectProvider provider,
+  TimeEntry entry,
+  DateFormat formatter,
+) {
+  final tags = entry.id == null ? const [] : provider.tagsForEntry(entry.id!);
+  final hasNote = entry.note != null && entry.note!.isNotEmpty;
+  final hasTitle = entry.title != null && entry.title!.isNotEmpty;
+  if (!hasTitle && !hasNote && tags.isEmpty) return null;
+
+  return Padding(
+    padding: const EdgeInsets.only(top: 2),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // The title already took over the primary line, so the
+        // timestamp moves down here instead of disappearing.
+        if (hasTitle)
+          Text(
+            formatter.format(entry.startedAt),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        if (hasNote) Text(entry.note!),
+        if (tags.isNotEmpty)
+          Padding(
+            padding: EdgeInsets.only(top: hasNote ? 4 : 0),
+            child: Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final tag in tags)
+                  Chip(
+                    label: Text('#${tag.name}', style: const TextStyle(fontSize: 11)),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: EdgeInsets.zero,
+                  ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+/// Discards the currently-active session (running or paused) entirely
+/// — nothing gets recorded, unlike "End & record". For the common
+/// slip of starting the wrong project, or realizing right away this
+/// shouldn't be timed at all. Confirmed first, and undoable via the
+/// same snackbar pattern as deleting a past session, since it's just
+/// as easy to tap by accident.
+Future<void> _cancelActiveSessionWithConfirm(
+  BuildContext context,
+  ProjectProvider provider,
+) async {
+  final active = provider.activeEntry;
+  if (active == null) return;
+  final t = context.l10n;
+  final confirmed = await confirmDelete(
+    context,
+    title: t.cancelSessionTitle,
+    message: t.cancelSessionMessage(formatDuration(active.duration, t)),
+  );
+  if (!confirmed) return;
+  await provider.deleteEntry(active);
+  if (context.mounted) {
+    showUndoSnackBar(
+      context,
+      message: t.sessionCancelled,
+      onUndo: () => provider.restoreEntry(active),
+    );
+  }
+}
+
 Future<void> _deleteEntryWithConfirm(
   BuildContext context,
   ProjectProvider provider,
   TimeEntry entry,
 ) async {
+  final t = context.l10n;
   final confirmed = await confirmDelete(
     context,
-    title: 'Delete this session?',
-    message: 'This removes the ${formatDuration(entry.duration)} session '
-        'logged on ${DateFormat('EEE, MMM d').format(entry.startedAt)}. '
-        'This can\'t be undone.',
+    title: t.deleteSessionTitle,
+    message: t.deleteSessionMessage(
+      formatDuration(entry.duration, t),
+      DateFormat('EEE, MMM d', t.locale.languageCode).format(entry.startedAt),
+    ),
   );
   if (!confirmed) return;
+  // Captured before the delete — deleting the entry also drops its
+  // tag links, so Undo needs to know what to restore them to.
+  final tagIds =
+      entry.id == null ? const <int>[] : provider.tagsForEntry(entry.id!).map((tag) => tag.id!).toList();
   await provider.deleteEntry(entry);
   if (context.mounted) {
     showUndoSnackBar(
       context,
-      message: 'Session removed',
-      onUndo: () => provider.restoreEntry(entry),
+      message: t.sessionRemoved,
+      onUndo: () => provider.restoreEntry(entry, tagIds: tagIds),
     );
   }
 }
 
 /// Opens the manual-entry dialog pre-filled with [entry]'s current
-/// start time, duration, and note, and saves whatever comes back.
+/// start time, duration, note, and tags, and saves whatever comes back.
 Future<void> _editEntry(
   BuildContext context,
   ProjectProvider provider,
   TimeEntry entry,
 ) async {
-  final result = await showAddManualEntryDialog(context, existing: entry);
+  final existingTagIds =
+      entry.id == null ? const <int>[] : provider.tagsForEntry(entry.id!).map((t) => t.id!).toList();
+  final result = await showAddManualEntryDialog(
+    context,
+    existing: entry,
+    existingTagIds: existingTagIds,
+  );
   if (result == null) return;
-  await provider.updateEntry(entry.copyWith(
-    startedAt: result.startedAt,
-    endedAt: result.startedAt.add(result.duration),
-    note: result.note,
-    clearNote: result.note == null,
-  ));
+  await provider.updateEntry(
+    entry.copyWith(
+      startedAt: result.startedAt,
+      endedAt: result.startedAt.add(result.duration),
+      title: result.title,
+      note: result.note,
+      clearNote: result.note == null,
+    ),
+    tagIds: result.tagIds,
+  );
+}
+
+/// One number in the "Time overview" row (this week / this month).
+class _OverviewStat extends StatelessWidget {
+  final String label;
+  final String value;
+  const _OverviewStat({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(value, style: Theme.of(context).textTheme.titleMedium),
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
+      ],
+    );
+  }
 }
 
 /// A small progress bar + label showing this week's tracked time
@@ -333,8 +562,8 @@ class _WeeklyGoalProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final progress = (minutesDone / minutesGoal).clamp(0.0, 1.0);
-    final doneLabel = formatDuration(Duration(minutes: minutesDone));
-    final goalLabel = formatDuration(Duration(minutes: minutesGoal));
+    final doneLabel = formatDuration(Duration(minutes: minutesDone), context.l10n);
+    final goalLabel = formatDuration(Duration(minutes: minutesGoal), context.l10n);
 
     return Column(
       children: [
@@ -349,7 +578,7 @@ class _WeeklyGoalProgress extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          '$doneLabel of $goalLabel this week',
+          context.l10n.doneOfGoalThisWeek(doneLabel, goalLabel),
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],

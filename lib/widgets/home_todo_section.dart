@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/project_provider.dart';
+import '../l10n/app_localizations.dart';
 import 'task_checklist.dart';
 
 /// The Habits page's to-do section: small things that don't belong to
@@ -18,14 +19,15 @@ class HomeTodoSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final due = provider.dueTasks;
     final later = provider.laterTasks;
+    final t = context.l10n;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TaskChecklist(
-          title: 'To-dos',
+          title: t.tasksTooltip,
           tasks: due,
-          addHint: 'Add a to-do',
+          addHint: t.addATask,
           onAdd: (name) => provider.addTask(name),
           onToggle: provider.toggleTask,
           onDelete: provider.deleteTask,
@@ -40,7 +42,7 @@ class HomeTodoSection extends StatelessWidget {
               tilePadding: EdgeInsets.zero,
               childrenPadding: EdgeInsets.zero,
               title: Text(
-                'Tasks for later (${later.length})',
+                t.tasksForLater(later.length),
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               children: [

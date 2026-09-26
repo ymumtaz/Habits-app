@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
 import 'data/habit_provider.dart';
 import 'data/project_provider.dart';
 import 'data/settings_provider.dart';
+import 'l10n/app_localizations.dart';
 import 'screens/root_nav_screen.dart';
 import 'theme/theme_provider.dart';
 
@@ -27,6 +29,14 @@ class HabitsApp extends StatelessWidget {
             theme: themeProvider.lightTheme,
             darkTheme: themeProvider.darkTheme,
             themeMode: themeProvider.themeMode,
+            locale: Locale(settingsProvider.languageCode),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: const [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
             // Applies the 12h/24h time preference to every time picker
             // and TimeOfDay.format() call app-wide, not just the
             // screens that explicitly check the setting.

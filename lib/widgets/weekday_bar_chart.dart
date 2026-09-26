@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/habit_log.dart';
 
 /// A column chart of a count/duration habit's average logged amount
@@ -20,8 +21,6 @@ class WeekdayBarChart extends StatelessWidget {
     required this.unitLabel,
   });
 
-  static const _labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
   @override
   Widget build(BuildContext context) {
     // Index 1..7 matches DateTime.weekday (Mon=1..Sun=7); index 0 unused.
@@ -40,7 +39,7 @@ class WeekdayBarChart extends StatelessWidget {
 
     if (maxValue <= 0) {
       return Text(
-        'Log a few days to see the pattern by day of the week.',
+        context.l10n.logAFewDaysPattern,
         style: Theme.of(context).textTheme.bodySmall,
       );
     }
@@ -58,7 +57,7 @@ class WeekdayBarChart extends StatelessWidget {
                 maxValue: maxValue,
                 hasData: counts[wd] > 0,
                 color: color,
-                label: _labels[wd - 1],
+                label: context.l10n.weekdayAbbrev(wd - 1),
               ),
             ),
           ],
